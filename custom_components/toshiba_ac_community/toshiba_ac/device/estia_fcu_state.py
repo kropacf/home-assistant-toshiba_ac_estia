@@ -121,12 +121,14 @@ class ToshibaEstiaFcuState:
         self._zone1_on_off = self.NONE_VAL
         self._water_operation_mode = 0
         self._zone1_target_temperature = self.NONE_VAL
+        self._zone1_applied_temperature = self.NONE_VAL
         self._outdoor_unit_heat = 0
         self._heating_coil_heat = 0
         self._zone1_auto = self.NONE_VAL
         self._zone2_on_off = self.NONE_VAL
         self._zone2_operation_mode = 0
         self._zone2_target_temperature = self.NONE_VAL
+        self._zone2_applied_temperature = self.NONE_VAL
         self._zone2_outdoor_unit_heat = 0
         self._zone2_heating_coil_heat = 0
         self._zone2_auto = self.NONE_VAL
@@ -148,14 +150,17 @@ class ToshibaEstiaFcuState:
             self._zone1_on_off,  # Byte 5 - Zone 1 on/off, 0x03 on / 0x02 off
             self._water_operation_mode,  # Byte 6 - Operation mode - heat/cool/auto
             self._zone1_target_temperature,  # Byte 7 - Zone 1 heating target temperature
-            _,  # Byte 8 - Second zone 1 target temperature, meaning unknown
+            # Byte 8 - Zone 1 water target the controller actually uses: the
+            # heating-curve value in auto, otherwise byte 7 taken over at the next
+            # control cycle (about a minute later)
+            self._zone1_applied_temperature,
             self._outdoor_unit_heat,  # Byte 9 - Outdoor unit active for zone 1
             self._heating_coil_heat,  # Byte 10 - Heating coil active for zone 1
             self._zone1_auto,  # Byte 11 - Zone 1 auto (heating curve) flag
             self._zone2_on_off,  # Byte 12 - Zone 2 on/off, same values as byte 5
             self._zone2_operation_mode,  # Byte 13 - Zone 2 operation mode
             self._zone2_target_temperature,  # Byte 14 - Zone 2 heating target temperature
-            _,  # Byte 15 - Second zone 2 target temperature, meaning unknown
+            self._zone2_applied_temperature,  # Byte 15 - Zone 2 applied target, as byte 8
             self._zone2_outdoor_unit_heat,  # Byte 16 - Outdoor unit active for zone 2
             self._zone2_heating_coil_heat,  # Byte 17 - Heating coil active for zone 2
             self._zone2_auto,  # Byte 18 - Zone 2 auto (heating curve) flag
@@ -238,6 +243,14 @@ class ToshibaEstiaFcuState:
     @property
     def zone2_target_temperature(self) -> t.Optional[float]:
         return ToshibaEstiaFcuState.Temperature.from_raw(self._zone2_target_temperature)
+
+    @property
+    def zone1_applied_temperature(self) -> t.Optional[float]:
+        return ToshibaEstiaFcuState.Temperature.from_raw(self._zone1_applied_temperature)
+
+    @property
+    def zone2_applied_temperature(self) -> t.Optional[float]:
+        return ToshibaEstiaFcuState.Temperature.from_raw(self._zone2_applied_temperature)
 
     @property
     def zone1_mode(self) -> EstiaWaterMode:

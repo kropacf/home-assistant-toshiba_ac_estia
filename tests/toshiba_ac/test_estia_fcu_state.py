@@ -21,6 +21,10 @@ STATE_AT_10_00 = "0c8800000206484800000002064848000000200062626666515cff00000088
 STATE_AT_10_30 = "0c8800000206484800000002064848000000200062626666525cff000000884848484e52"
 
 
+# Heating curve on at -1 C outside (captured 2026-11-06 23:16): manual targets
+# 33 C / 27 C stay in bytes 7 / 14, the curve values 35.5 C / 26.5 C appear in
+# the applied-target bytes 8 / 15
+STATE_HEATING_CURVE = "0c7a000003066267010001030656550100012006696b6b6b2e60ff0000007a6256484e52"
 class EstiaFcuStateTest(unittest.TestCase):
     def test_decodes_setpoints_and_mode(self) -> None:
         state = ToshibaEstiaFcuState.from_hex_state(STATE_AT_10_00)
@@ -107,6 +111,23 @@ class EstiaFcuStateTest(unittest.TestCase):
         self.assertIsNone(ToshibaEstiaFcuState.WaterTemperature.from_raw(0))
         self.assertIsNone(ToshibaEstiaFcuState.WaterTemperature.from_raw(0xFF))
         self.assertIsNone(ToshibaEstiaFcuState.WaterTemperature.from_raw(None))
+
+    def test_decodes_applied_targets_separately_from_manual_targets(self) -> None:
+        state = ToshibaEstiaFcuState.from_hex_state(STATE_HEATING_CURVE)
+
+        self.assertEqual(state.zone1_target_temperature, 33.0)
+        self.assertEqual(state.zone1_applied_temperature, 35.5)
+        self.assertEqual(state.zone2_target_temperature, 27.0)
+        self.assertEqual(state.zone2_applied_temperature, 26.5)
+
+    def test_applied_targets_follow_a_status_diff(self) -> None:
+        state = ToshibaEstiaFcuState.from_hex_state(STATE_HEATING_CURVE)
+        # Unit-initiated diff: applied targets back to the manual 33 C / 27 C
+        state.update("ffffffffffffff62ffffffffffff56" + "ff" * 21)
+
+        self.assertEqual(state.zone1_applied_temperature, 33.0)
+        self.assertEqual(state.zone2_applied_temperature, 27.0)
+        self.assertEqual(state.zone1_target_temperature, 33.0)
 
 
 if __name__ == "__main__":

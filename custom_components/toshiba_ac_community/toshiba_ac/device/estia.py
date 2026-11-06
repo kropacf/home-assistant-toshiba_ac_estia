@@ -350,6 +350,16 @@ class ToshibaEstiaDevice:
         return self.fcu_state.zone2_target_temperature
 
     @property
+    def zone1_applied_temperature(self) -> t.Optional[float]:
+        """Return the zone 1 water target in use, the heating-curve value in auto."""
+        return self.fcu_state.zone1_applied_temperature
+
+    @property
+    def zone2_applied_temperature(self) -> t.Optional[float]:
+        """Return the zone 2 water target in use, the heating-curve value in auto."""
+        return self.fcu_state.zone2_applied_temperature
+
+    @property
     def auto_mode(self) -> t.Optional[bool]:
         """Return whether the heating curve is on, None if not reported."""
         return self.fcu_state.zone1_auto

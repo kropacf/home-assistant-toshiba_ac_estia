@@ -20,7 +20,7 @@ Toshiba AC integration into home-assistant.io
 > | `climate` | Zone 1, Zone 2 (only on units with a second zone) - water target temperature, heat/off |
 > | `water_heater` | Hot water - target temperature, on/off |
 > | `switch` | Heating curve (auto), Night setback, Hot water boost (electric heater), Frost protection, Anti-bacterial (legionella) |
-> | `sensor` | Compressor status, hot water target, energy consumption, water flow rate, outdoor temperature, water heat exchanger inlet/outlet, water heater outlet, floor heating inlet |
+> | `sensor` | Compressor status, hot water target, applied water temperature per zone (heating-curve value in auto), energy consumption, water flow rate, outdoor temperature, water heat exchanger inlet/outlet, water heater outlet, floor heating inlet |
 > | `binary_sensor` | Water pump, heat electric heater, DHW electric heater |
 >
 > Control notes:

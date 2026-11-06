@@ -99,6 +99,12 @@
       },
       "water_flow_rate": {
         "name": "Water flow rate"
+      },
+      "zone1_applied_temperature": {
+        "name": "Zone 1 applied water temperature"
+      },
+      "zone2_applied_temperature": {
+        "name": "Zone 2 applied water temperature"
       }
     },
     "switch": {

@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2026.10.0.3] - 2026-11-06
+
+### Added - applied water temperature per zone
+
+New sensors **Zone 1 applied water temperature** and **Zone 2 applied water temperature** (zone 2 only on units that report it). They show the water target the controller actually works with: with the heating curve on this is the curve value for the current outdoor temperature, otherwise the manual target, taken over about a minute after a change. Decoded from status bytes 8 and 15, which were previously unknown.
+
 ## [2026.10.0.2] - 2026-11-06
 
 Fork release ([kropacf/home-assistant-toshiba_ac_estia](https://github.com/kropacf/home-assistant-toshiba_ac_estia)).

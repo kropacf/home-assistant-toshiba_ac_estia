@@ -75,6 +75,14 @@ ESTIA_SENSORS: tuple[ToshibaEstiaSensorDescription, ...] = (
         value_fn=lambda device: device.dhw_target_temperature,
     ),
     ToshibaEstiaSensorDescription(
+        key="zone1_applied_temperature",
+        translation_key="zone1_applied_temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        value_fn=lambda device: device.zone1_applied_temperature,
+    ),
+    ToshibaEstiaSensorDescription(
         key="twi_temperature",
         translation_key="twi_temperature",
         device_class=SensorDeviceClass.TEMPERATURE,
@@ -131,6 +139,18 @@ ESTIA_SENSORS: tuple[ToshibaEstiaSensorDescription, ...] = (
     ),
 )
 
+# Only for units that report a second zone
+ESTIA_ZONE2_SENSORS: tuple[ToshibaEstiaSensorDescription, ...] = (
+    ToshibaEstiaSensorDescription(
+        key="zone2_applied_temperature",
+        translation_key="zone2_applied_temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        value_fn=lambda device: device.zone2_applied_temperature,
+    ),
+)
+
 
 async def async_setup_entry(hass, config_entry, async_add_devices):
     """Add sensor entities for passed config_entry in HA."""
@@ -152,9 +172,12 @@ async def async_setup_entry(hass, config_entry, async_add_devices):
 
     estia_devices: list[ToshibaEstiaDevice] = await device_manager.get_estia_devices()
     for estia_device in estia_devices:
+        descriptions = ESTIA_SENSORS
+        if estia_device.has_zone2:
+            descriptions += ESTIA_ZONE2_SENSORS
         new_entities.extend(
             ToshibaEstiaSensor(estia_device, description)
-            for description in ESTIA_SENSORS
+            for description in descriptions
         )
         new_entities.append(ToshibaEstiaPowerSensor(estia_device))
 
