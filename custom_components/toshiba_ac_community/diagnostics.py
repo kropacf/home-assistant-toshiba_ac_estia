@@ -106,4 +106,45 @@ async def async_get_config_entry_diagnostics(
     except Exception as ex:
         diagnostics_data["error"] = f"Failed to get devices: {ex}"
 
+    try:
+        estia_devices = await device_manager.get_estia_devices()
+        estia_devices_data = []
+        for device in estia_devices:
+            estia_devices_data.append(
+                {
+                    "name": device.name,
+                    "ac_id": "**REDACTED**",
+                    "ac_unique_id": "**REDACTED**",
+                    "device_id": "**REDACTED**",
+                    "firmware_version": device.firmware_version,
+                    "merit_feature": device.merit_feature,
+                    "ac_model_id": device.ac_model_id,
+                    "cdu": device.cdu,
+                    "fcu": device.fcu,
+                    "is_online": device.is_online,
+                    "zone1_mode": device.zone1_mode.name,
+                    "zone1_target_temperature": device.zone1_target_temperature,
+                    "dhw_target_temperature": device.dhw_target_temperature,
+                    "compressor_status": device.compressor_status.name,
+                    "water_pump_status": device.water_pump_status,
+                    "electric_coil_dhw_is_active": device.electric_coil_dhw_is_active,
+                    "electric_coil_heat_is_active": device.electric_coil_heat_is_active,
+                    "twi_temperature": device.twi_temperature,
+                    "two_temperature": device.two_temperature,
+                    "tho_temperature": device.tho_temperature,
+                    "to_temperature": device.to_temperature,
+                    "tfi_temperature": device.tfi_temperature,
+                    "room_water_temperature": device.room_water_temperature,
+                    "water_flow_rate": device.water_flow_rate,
+                    # The raw status string is the only way to tell apart "byte not
+                    # understood yet" from "value really is zero" in a bug report
+                    "status_string": device.fcu_state.status_string,
+                }
+            )
+
+        diagnostics_data["estia_devices"] = estia_devices_data
+        diagnostics_data["estia_device_count"] = len(estia_devices)
+    except Exception as ex:
+        diagnostics_data["estia_error"] = f"Failed to get Estia devices: {ex}"
+
     return diagnostics_data

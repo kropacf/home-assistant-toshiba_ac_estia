@@ -1,7 +1,7 @@
 """Tests for the Toshiba AC config flow.
 
-Runs against the real ToshibaAcDeviceManager from the pinned
-toshiba-ac-community release; only the network edges (HTTP login, device
+Runs against the real ToshibaAcDeviceManager from the vendored toshiba_ac
+library; only the network edges (HTTP login, device
 registration, AMQP) are stubbed. Reproduces vmvelev/Toshiba-AC-control#13:
 validate_input read device_manager.http_api after shutdown() had set it to
 None, so every successful login crashed with AssertionError.
@@ -16,12 +16,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import toshiba_ac.device_manager  # noqa: F401  # must precede http_api (circular import)
-from toshiba_ac.utils.http_api import ToshibaAcHttpApi, ToshibaAcHttpApiAuthError
-
 from custom_components.toshiba_ac_community.config_flow import (
     InvalidAuth,
     validate_input,
+)
+import custom_components.toshiba_ac_community.toshiba_ac.device_manager  # noqa: F401  # must precede http_api (circular import)
+from custom_components.toshiba_ac_community.toshiba_ac.utils.http_api import (
+    ToshibaAcHttpApi,
+    ToshibaAcHttpApiAuthError,
 )
 
 USER_INPUT = {"username": "user@example.com", "password": "hunter2"}
@@ -46,7 +48,7 @@ def _network_stubs(connect=None):
             ToshibaAcHttpApi, "register_client", AsyncMock(return_value="sas-token")
         ),
         patch(
-            "toshiba_ac.device_manager.ToshibaAcAmqpApi", MagicMock(return_value=amqp)
+            "custom_components.toshiba_ac_community.toshiba_ac.device_manager.ToshibaAcAmqpApi", MagicMock(return_value=amqp)
         ),
         amqp,
     )

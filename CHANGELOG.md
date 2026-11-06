@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2026.8.4.1] - 2026-11-06
+
+Fork release ([kropacf/home-assistant-toshiba_ac_estia](https://github.com/kropacf/home-assistant-toshiba_ac_estia)) based on 2026.8.4.
+
+### Added - Toshiba Estia heat pumps
+
+Estia units on the account now get read-only entities: a Zone 1 climate entity, a hot water `water_heater`, sensors (compressor status, hot water target, energy consumption, water flow rate, outdoor and water circuit temperatures) and binary sensors (water pump, heat and DHW electric heaters).
+
+### Changed - protocol library is vendored
+
+The `toshiba_ac` library (`toshiba-ac-community` 0.7.2 plus Estia support) now ships inside the integration at `custom_components/toshiba_ac_community/toshiba_ac/` and is no longer installed from PyPI. Its tests live in `tests/toshiba_ac/`.
+
 ## [2026.8.4] - 2026-08-29
 
 This release bundles protocol library **`toshiba-ac-community` 0.7.2**.

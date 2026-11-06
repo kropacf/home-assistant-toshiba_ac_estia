@@ -7,15 +7,6 @@ from enum import Enum
 import logging
 from typing import Any, Generic, TypeVar
 
-from toshiba_ac.device import (
-    ToshibaAcAirPureIon,
-    ToshibaAcDevice,
-    ToshibaAcFeatures,
-    ToshibaAcMeritA,
-    ToshibaAcStatus,
-    ToshibaAcWirelessLed,
-)
-
 from homeassistant.components.switch import (
     SwitchDeviceClass,
     SwitchEntity,
@@ -26,6 +17,14 @@ from homeassistant.const import EntityCategory
 from .const import DOMAIN
 from .entity import ToshibaAcStateEntity
 from .entity_description import ToshibaAcEnumEntityDescriptionMixin
+from .toshiba_ac.device import (
+    ToshibaAcAirPureIon,
+    ToshibaAcDevice,
+    ToshibaAcFeatures,
+    ToshibaAcMeritA,
+    ToshibaAcStatus,
+    ToshibaAcWirelessLed,
+)
 
 _LOGGER = logging.getLogger(__name__)
 

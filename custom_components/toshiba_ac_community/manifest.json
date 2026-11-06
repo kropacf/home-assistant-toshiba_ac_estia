@@ -4,16 +4,15 @@
   "codeowners": ["@vmvelev"],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://github.com/vmvelev/home-assistant-toshiba_ac",
+  "documentation": "https://github.com/kropacf/home-assistant-toshiba_ac_estia",
   "homekit": {},
   "iot_class": "cloud_push",
-  "issue_tracker": "https://github.com/vmvelev/home-assistant-toshiba_ac/issues",
+  "issue_tracker": "https://github.com/kropacf/home-assistant-toshiba_ac_estia/issues",
   "requirements": [
     "azure-iot-device==2.15.0rc1",
-    "toshiba-ac-community==0.7.2",
     "janus==1.0.0"
   ],
   "ssdp": [],
-  "version": "2026.8.4",
+  "version": "2026.8.4.1",
   "zeroconf": []
 }

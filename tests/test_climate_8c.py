@@ -16,11 +16,17 @@ from unittest.mock import AsyncMock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from toshiba_ac.device import ToshibaAcDevice, ToshibaAcMeritA
-from toshiba_ac.utils.amqp_api import ToshibaAcAmqpApi
-from toshiba_ac.utils.http_api import ToshibaAcHttpApi
-
 from custom_components.toshiba_ac_community.climate import ToshibaClimate
+from custom_components.toshiba_ac_community.toshiba_ac.device import (
+    ToshibaAcDevice,
+    ToshibaAcMeritA,
+)
+from custom_components.toshiba_ac_community.toshiba_ac.utils.amqp_api import (
+    ToshibaAcAmqpApi,
+)
+from custom_components.toshiba_ac_community.toshiba_ac.utils.http_api import (
+    ToshibaAcHttpApi,
+)
 
 # Real devices from the #35 report (names, merit strings, states from the log).
 SHORAI_EDGE = ("Salon", "6c02", "3", "30421b41316400101b23fe02000010ff000000")

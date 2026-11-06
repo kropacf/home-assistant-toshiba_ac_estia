@@ -5,7 +5,19 @@ from collections.abc import Mapping
 import logging
 from typing import Any
 
-from toshiba_ac.device import (
+from homeassistant.components.climate import ClimateEntity
+from homeassistant.components.climate.const import (
+    FAN_OFF,
+    ClimateEntityFeature,
+    HVACAction,
+    HVACMode,
+)
+from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
+
+from .const import DOMAIN
+from .entity import ToshibaAcStateEntity, ToshibaEstiaStateEntity
+from .feature_list import get_feature_by_name, get_feature_list
+from .toshiba_ac.device import (
     ToshibaAcDevice,
     ToshibaAcFanMode,
     ToshibaAcMeritA,
@@ -15,19 +27,9 @@ from toshiba_ac.device import (
     ToshibaAcStatus,
     ToshibaAcSwingMode,
 )
-from toshiba_ac.utils import pretty_enum_name
-
-from homeassistant.components.climate import ClimateEntity
-from homeassistant.components.climate.const import (
-    FAN_OFF,
-    ClimateEntityFeature,
-    HVACMode,
-)
-from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
-
-from .const import DOMAIN
-from .entity import ToshibaAcStateEntity
-from .feature_list import get_feature_by_name, get_feature_list
+from .toshiba_ac.device.estia import ToshibaEstiaDevice
+from .toshiba_ac.device.properties import EstiaCompressorStatus, EstiaWaterMode
+from .toshiba_ac.utils import pretty_enum_name
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -41,6 +43,13 @@ TOSHIBA_TO_HVAC_MODE = {
 
 HVAC_MODE_TO_TOSHIBA = {v: k for k, v in TOSHIBA_TO_HVAC_MODE.items()}
 
+ESTIA_WATER_MODE_TO_HVAC_MODE = {
+    EstiaWaterMode.AUTO: HVACMode.AUTO,
+    EstiaWaterMode.COOL: HVACMode.COOL,
+    EstiaWaterMode.HEAT: HVACMode.HEAT,
+    EstiaWaterMode.NONE: HVACMode.OFF,
+}
+
 
 async def async_setup_entry(hass, config_entry, async_add_devices):
     """Add climate entities for passed config_entry in HA."""
@@ -48,6 +57,9 @@ async def async_setup_entry(hass, config_entry, async_add_devices):
 
     devices = await device_manager.get_devices()
     new_entities = [ToshibaClimate(device) for device in devices]
+
+    estia_devices = await device_manager.get_estia_devices()
+    new_entities.extend(ToshibaEstiaHeatingZone(device) for device in estia_devices)
 
     if new_entities:
         _LOGGER.info("Adding %d climate entities", len(new_entities))
@@ -282,3 +294,83 @@ class ToshibaClimate(ToshibaAcStateEntity, ClimateEntity):
             "self_cleaning": self._device.ac_self_cleaning.name,
             "outdoor_temperature": self._device.ac_outdoor_temperature,
         }
+
+
+class ToshibaEstiaHeatingZone(ToshibaEstiaStateEntity, ClimateEntity):
+    """The space heating zone of a Toshiba Estia heat pump.
+
+    Read-only: Toshiba's protocol for writing to an Estia unit has not been
+    reverse engineered, so no feature flag is advertised and the entity exposes
+    no setters. Use the Toshiba app or the wall controller to change anything.
+    """
+
+    _attr_translation_key = "zone_1"
+    _attr_supported_features = ClimateEntityFeature(0)
+    _attr_target_temperature_step = 1
+    _attr_temperature_unit = UnitOfTemperature.CELSIUS
+
+    def __init__(self, toshiba_device: ToshibaEstiaDevice):
+        """Initialize the climate entity."""
+        super().__init__(toshiba_device)
+        self._attr_unique_id = f"{self._device.ac_unique_id}_climate"
+
+    @property
+    def hvac_mode(self) -> HVACMode:
+        """Return the mode the water circuit is operating in."""
+        return ESTIA_WATER_MODE_TO_HVAC_MODE.get(self._device.zone1_mode, HVACMode.OFF)
+
+    @property
+    def hvac_modes(self) -> list[HVACMode]:
+        """Return the selectable modes, of which there are none.
+
+        Reporting only the current mode keeps the frontend from offering a
+        switch that cannot be honoured.
+        """
+        return [self.hvac_mode]
+
+    @property
+    def hvac_action(self) -> HVACAction:
+        """Return what the heat pump is doing for this zone right now.
+
+        Only work done for space conditioning counts: the compressor also runs
+        for hot water, and that is the water heater entity's business.
+        """
+        if self._device.zone1_mode == EstiaWaterMode.NONE:
+            return HVACAction.OFF
+
+        working = (
+            self._device.compressor_status == EstiaCompressorStatus.HEAT
+            or self._device.electric_coil_heat_is_active
+        )
+
+        if not working:
+            return HVACAction.IDLE
+
+        if self._device.zone1_mode == EstiaWaterMode.COOL:
+            return HVACAction.COOLING
+
+        return HVACAction.HEATING
+
+    @property
+    def current_temperature(self) -> float | None:
+        """Return the water temperature entering the heating circuit.
+
+        The heat pump does not know the room temperature - the water going out
+        into the floor loop is the closest thing it measures.
+        """
+        return self._device.tfi_temperature
+
+    @property
+    def target_temperature(self) -> float | None:
+        """Return the water temperature the zone is set to reach."""
+        return self._device.zone1_target_temperature
+
+    @property
+    def min_temp(self) -> float:
+        """Return the minimum temperature."""
+        return 20
+
+    @property
+    def max_temp(self) -> float:
+        """Return the maximum temperature."""
+        return 40

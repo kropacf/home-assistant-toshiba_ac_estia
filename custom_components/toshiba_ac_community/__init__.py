@@ -4,16 +4,15 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from toshiba_ac.device_manager import ToshibaAcDeviceManager
-
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.event import async_call_later
 
 from .const import DOMAIN
+from .toshiba_ac.device_manager import ToshibaAcDeviceManager
 
-PLATFORMS = ["binary_sensor", "climate", "select", "sensor", "switch"]
+PLATFORMS = ["binary_sensor", "climate", "select", "sensor", "switch", "water_heater"]
 
 _LOGGER = logging.getLogger(__name__)
 

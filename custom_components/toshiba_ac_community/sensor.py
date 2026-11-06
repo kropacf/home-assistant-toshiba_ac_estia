@@ -1,23 +1,135 @@
 """Platform for sensor integration."""
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date, datetime
 import logging
-
-from toshiba_ac.device import ToshibaAcDevice, ToshibaAcDeviceEnergyConsumption
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
+    SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.const import UnitOfEnergy, UnitOfTemperature
+from homeassistant.const import UnitOfEnergy, UnitOfTemperature, UnitOfVolumeFlowRate
 from homeassistant.helpers.typing import StateType
 
 from .const import DOMAIN
-from .entity import ToshibaAcEntity, ToshibaAcStateEntity
+from .entity import (
+    ToshibaAcEntity,
+    ToshibaAcStateEntity,
+    ToshibaEstiaEntity,
+    ToshibaEstiaStateEntity,
+)
+from .toshiba_ac.device import ToshibaAcDevice, ToshibaAcDeviceEnergyConsumption
+from .toshiba_ac.device.estia import ToshibaEstiaDevice
+from .toshiba_ac.device.properties import EstiaCompressorStatus, EstiaWaterMode
 
 _LOGGER = logging.getLogger(__name__)
+
+COMPRESSOR_STATUS_OFF = "Off"
+COMPRESSOR_STATUS_HOT_WATER = "Hot Water"
+COMPRESSOR_STATUS_HEAT = "Heat"
+COMPRESSOR_STATUS_COOL = "Cool"
+
+COMPRESSOR_STATUS_OPTIONS = [
+    COMPRESSOR_STATUS_OFF,
+    COMPRESSOR_STATUS_HOT_WATER,
+    COMPRESSOR_STATUS_HEAT,
+    COMPRESSOR_STATUS_COOL,
+]
+
+COMPRESSOR_STATUS_TO_STRING = {
+    EstiaCompressorStatus.OFF: COMPRESSOR_STATUS_OFF,
+    EstiaCompressorStatus.DHW: COMPRESSOR_STATUS_HOT_WATER,
+    EstiaCompressorStatus.HEAT: COMPRESSOR_STATUS_HEAT,
+}
+
+
+def _compressor_status(device: ToshibaEstiaDevice) -> StateType:
+    status = COMPRESSOR_STATUS_TO_STRING.get(device.compressor_status)
+
+    # The heat pump reports the compressor as running for space conditioning
+    # without saying which way round it runs, so the water mode has to be
+    # cross-referenced to tell cooling from heating.
+    if status == COMPRESSOR_STATUS_HEAT and device.zone1_mode == EstiaWaterMode.COOL:
+        return COMPRESSOR_STATUS_COOL
+
+    return status
+
+
+@dataclass(frozen=True, kw_only=True)
+class ToshibaEstiaSensorDescription(SensorEntityDescription):
+    """Describes a sensor read off an Estia heat pump."""
+
+    value_fn: Callable[[ToshibaEstiaDevice], StateType]
+
+
+ESTIA_SENSORS: tuple[ToshibaEstiaSensorDescription, ...] = (
+    ToshibaEstiaSensorDescription(
+        key="dhw_target_temperature",
+        translation_key="dhw_target_temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        value_fn=lambda device: device.dhw_target_temperature,
+    ),
+    ToshibaEstiaSensorDescription(
+        key="twi_temperature",
+        translation_key="twi_temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        value_fn=lambda device: device.twi_temperature,
+    ),
+    ToshibaEstiaSensorDescription(
+        key="two_temperature",
+        translation_key="two_temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        value_fn=lambda device: device.two_temperature,
+    ),
+    ToshibaEstiaSensorDescription(
+        key="tho_temperature",
+        translation_key="tho_temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        value_fn=lambda device: device.tho_temperature,
+    ),
+    ToshibaEstiaSensorDescription(
+        key="to_temperature",
+        translation_key="to_temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        value_fn=lambda device: device.to_temperature,
+    ),
+    ToshibaEstiaSensorDescription(
+        key="tfi_temperature",
+        translation_key="tfi_temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        value_fn=lambda device: device.tfi_temperature,
+    ),
+    ToshibaEstiaSensorDescription(
+        key="water_flow_rate",
+        translation_key="water_flow_rate",
+        device_class=SensorDeviceClass.VOLUME_FLOW_RATE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfVolumeFlowRate.LITERS_PER_MINUTE,
+        value_fn=lambda device: device.water_flow_rate,
+    ),
+    ToshibaEstiaSensorDescription(
+        key="compressor_status",
+        translation_key="compressor_status",
+        device_class=SensorDeviceClass.ENUM,
+        options=COMPRESSOR_STATUS_OPTIONS,
+        value_fn=_compressor_status,
+    ),
+)
 
 
 async def async_setup_entry(hass, config_entry, async_add_devices):
@@ -37,6 +149,14 @@ async def async_setup_entry(hass, config_entry, async_add_devices):
         # Temperature sensors - outdoor value may be None when outdoor unit is off
         new_entities.append(ToshibaTempSensor(device, "indoor_temperature"))
         new_entities.append(ToshibaTempSensor(device, "outdoor_temperature"))
+
+    estia_devices: list[ToshibaEstiaDevice] = await device_manager.get_estia_devices()
+    for estia_device in estia_devices:
+        new_entities.extend(
+            ToshibaEstiaSensor(estia_device, description)
+            for description in ESTIA_SENSORS
+        )
+        new_entities.append(ToshibaEstiaPowerSensor(estia_device))
 
     if new_entities:
         _LOGGER.info("Adding %d sensor entities", len(new_entities))
@@ -96,6 +216,84 @@ class ToshibaPowerSensor(ToshibaAcEntity, SensorEntity):
         if self._ac_energy_consumption:
             return self._ac_energy_consumption.energy_wh
         return None
+
+
+class ToshibaEstiaPowerSensor(ToshibaEstiaEntity, SensorEntity):
+    """Year-to-date energy consumption of an Estia heat pump."""
+
+    _attr_native_unit_of_measurement = UnitOfEnergy.WATT_HOUR
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.TOTAL
+    _attr_translation_key = "energy_consumption"
+    _ac_energy_consumption: ToshibaAcDeviceEnergyConsumption | None = None
+
+    def __init__(self, toshiba_device: ToshibaEstiaDevice):
+        """Initialize the sensor."""
+        super().__init__(toshiba_device)
+        self._attr_unique_id = f"{self._device.ac_unique_id}_sensor"
+
+    def _update_energy_consumption(self) -> None:
+        """Read the latest energy consumption from the device."""
+        self._ac_energy_consumption = self._device.ac_energy_consumption
+        self._attr_last_reset = (
+            self._ac_energy_consumption.since if self._ac_energy_consumption else None
+        )
+
+    async def state_changed(self, _dev: ToshibaEstiaDevice):
+        """Call if we need to change the HA state."""
+        self._update_energy_consumption()
+        self.async_write_ha_state()
+
+    async def async_added_to_hass(self):
+        """Run when this Entity has been added to HA."""
+        self._device.on_energy_consumption_changed_callback.add(self.state_changed)
+        # The manager starts fetching energy as soon as it discovers the devices.
+        # Synchronize here in case that first update happened before this entity
+        # registered its callback.
+        self._update_energy_consumption()
+
+    async def async_will_remove_from_hass(self):
+        """Entity being removed from hass."""
+        self._device.on_energy_consumption_changed_callback.remove(self.state_changed)
+
+    @property
+    def native_value(self) -> StateType | date | datetime:
+        """Return the value reported by the sensor."""
+        if self._ac_energy_consumption:
+            return self._ac_energy_consumption.energy_wh
+        return None
+
+
+class ToshibaEstiaSensor(ToshibaEstiaStateEntity, SensorEntity):
+    """A single value read off an Estia heat pump."""
+
+    entity_description: ToshibaEstiaSensorDescription
+
+    def __init__(
+        self, device: ToshibaEstiaDevice, description: ToshibaEstiaSensorDescription
+    ):
+        """Initialize the sensor."""
+        super().__init__(device)
+        self.entity_description = description
+        # Suffix kept for compatibility with the standalone toshiba_estia integration
+        self._attr_unique_id = f"{device.ac_unique_id}_{description.key}_sensor"
+
+    @property
+    def available(self) -> bool:
+        """Return True if sensor is available.
+
+        A water sensor that the installation does not have wired up reports no
+        value at all, rather than reporting zero.
+        """
+        if self.native_value is None:
+            return False
+
+        return super().available
+
+    @property
+    def native_value(self) -> StateType:
+        """Return the value reported by the sensor."""
+        return self.entity_description.value_fn(self._device)
 
 
 class ToshibaTempSensor(ToshibaAcStateEntity, SensorEntity):

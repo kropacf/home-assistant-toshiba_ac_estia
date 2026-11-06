@@ -9,6 +9,23 @@
 
 Toshiba AC integration into home-assistant.io
 
+> ### Toshiba Estia fork
+>
+> This repository ([kropacf/home-assistant-toshiba_ac_estia](https://github.com/kropacf/home-assistant-toshiba_ac_estia)) is a fork of [vmvelev/home-assistant-toshiba_ac](https://github.com/vmvelev/home-assistant-toshiba_ac) that adds support for **Toshiba Estia** air-to-water heat pumps. AC units and Estia units on the same Toshiba account share one cloud connection; the Toshiba cloud allows only one client per account, so this integration replaces a separate Estia integration rather than running next to it.
+>
+> Estia entities (read-only):
+>
+> | Platform | Entities |
+> |----------|----------|
+> | `climate` | Zone 1 |
+> | `water_heater` | Hot water |
+> | `sensor` | Compressor status, hot water target, energy consumption, water flow rate, outdoor temperature, water heat exchanger inlet/outlet, water heater outlet, floor heating inlet |
+> | `binary_sensor` | Water pump, heat electric heater, DHW electric heater |
+>
+> The protocol library is **vendored** in `custom_components/toshiba_ac_community/toshiba_ac/` (`toshiba-ac-community` 0.7.2 plus Estia support, Apache-2.0, see the `LICENSE.txt` there) instead of being installed from PyPI.
+>
+> Install through HACS as a custom repository (category *Integration*). It uses the same `toshiba_ac_community` domain as the original, so uninstall the original from HACS first; the existing config entry and entities are kept.
+
 > ### ⚠️ Upgrading from 2026.5.5 or earlier? (one-time action required)
 >
 > In **2026.6.0** the integration domain changed from `toshiba_ac` to **`toshiba_ac_community`** (required to join the default HACS catalog - see [hacs/default#7350](https://github.com/hacs/default/pull/7350)). Home Assistant can't move a configured integration to a new domain automatically, so you must **remove and re-add the integration once**. There are two ways to do it:

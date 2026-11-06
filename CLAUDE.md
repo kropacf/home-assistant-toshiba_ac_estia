@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Home Assistant custom component integration for Toshiba AC units. Connects to Toshiba's cloud service via the `toshiba_ac` library to control air conditioning units and retrieve status.
+Home Assistant custom component integration for Toshiba AC units and Toshiba Estia air-to-water heat pumps (Estia is read-only). Connects to Toshiba's cloud service via the vendored `toshiba_ac` library to control air conditioning units and retrieve status.
+
+This repo is a fork of `vmvelev/home-assistant-toshiba_ac` that adds Estia support. It keeps the `toshiba_ac_community` domain so it can replace the original in place.
 
 ## Development Environment
 
@@ -28,24 +30,31 @@ pre-commit run --all-files
 
 ## CI/CD Validation
 
-The repository has no local test suite. Validation happens via GitHub Actions:
+Local tests (run from the repo root with the dev venv):
+
+```bash
+.venv/bin/python -m pytest tests/toshiba_ac   # vendored library, incl. Estia
+.venv/bin/python tests/test_config_flow.py    # integration tests run as scripts
+```
+
+GitHub Actions validation:
 - **hassfest**: Home Assistant integration manifest validation (`home-assistant/actions/hassfest@master`)
 - **HACS**: HACS repository validation (`hacs/action@main`)
 - **Linting**: Pre-commit hooks (black, isort, flake8, pyupgrade, codespell, yamllint)
 
 ## Dependencies
 
-### External Library
-The integration depends on the `toshiba_ac` library (import name unchanged), distributed on PyPI as `toshiba-ac-community` from this project's own fork `github.com/vmvelev/Toshiba-AC-control` (forked from `github.com/KaSroka/Toshiba-AC-control`):
+### Vendored Library
+The `toshiba_ac` library is **vendored** in `custom_components/toshiba_ac_community/toshiba_ac/`: `toshiba-ac-community` 0.7.2 (`github.com/vmvelev/Toshiba-AC-control`, forked from `github.com/KaSroka/Toshiba-AC-control`, Apache-2.0) plus Estia support (`device/estia.py`, `device/estia_fcu_state.py`):
 - Handles authentication with Toshiba cloud HTTP API
 - Manages Azure AMQP connection for real-time device state updates
-- Provides `ToshibaAcDeviceManager` and `ToshibaAcDevice` classes
+- Provides `ToshibaAcDeviceManager`, `ToshibaAcDevice` and `ToshibaEstiaDevice` classes
 
-All AC communication logic lives in that library, not in this repo.
+Inside the vendored package all imports are relative; the integration imports it as `.toshiba_ac`. Do not reintroduce `toshiba-ac-community` in `manifest.json`: HA would install the PyPI copy, which has no Estia support. The Toshiba cloud allows one client per account, so AC and Estia must share this integration's single connection.
 
 ### Requirements Files
-- `requirements.txt` - Runtime: `toshiba-ac-community` (pinned, same version as manifest.json), `azure-iot-device==2.15.0rc1`, `janus==1.0.0`
-- `requirements_dev.txt` - Development: `homeassistant==2026.1.2` + pre-commit + git install of the `toshiba-ac-community` fork (`vmvelev/Toshiba-AC-control`)
+- `requirements.txt` - Runtime: `azure-iot-device==2.15.0rc1`, `janus==1.0.0` (same pins as manifest.json; the library itself is vendored)
+- `requirements_dev.txt` - Development: `homeassistant==2026.1.2` + pre-commit
 
 ## Home Assistant Imports
 
@@ -73,7 +82,7 @@ All imports follow the [official HA documentation](https://developers.home-assis
 
 ## Architecture
 
-**Platforms** (defined in `__init__.py`): `climate`, `select`, `sensor`, `switch`
+**Platforms** (defined in `__init__.py`): `binary_sensor`, `climate`, `select`, `sensor`, `switch`, `water_heater` (`water_heater` is Estia-only)
 
 **Entry Point (`__init__.py`)**
 - Creates `ToshibaAcDeviceManager` with credentials from config entry

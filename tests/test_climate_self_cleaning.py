@@ -19,11 +19,17 @@ from unittest.mock import AsyncMock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from toshiba_ac.device import ToshibaAcDevice, ToshibaAcStatus
-from toshiba_ac.utils.amqp_api import ToshibaAcAmqpApi
-from toshiba_ac.utils.http_api import ToshibaAcHttpApi
-
 from custom_components.toshiba_ac_community.climate import ToshibaClimate
+from custom_components.toshiba_ac_community.toshiba_ac.device import (
+    ToshibaAcDevice,
+    ToshibaAcStatus,
+)
+from custom_components.toshiba_ac_community.toshiba_ac.utils.amqp_api import (
+    ToshibaAcAmqpApi,
+)
+from custom_components.toshiba_ac_community.toshiba_ac.utils.http_api import (
+    ToshibaAcHttpApi,
+)
 from homeassistant.components.climate import HVACMode
 
 # Real states from the same unit: cleaning (status ON + self-clean ON),

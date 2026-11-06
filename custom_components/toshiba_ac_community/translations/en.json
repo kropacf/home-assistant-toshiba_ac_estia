@@ -27,8 +27,22 @@
   },
   "entity": {
     "binary_sensor": {
+      "dhw_electric_heater": {
+        "name": "DHW electric heater"
+      },
+      "heat_electric_heater": {
+        "name": "Heat electric heater"
+      },
       "self_cleaning": {
         "name": "Self cleaning"
+      },
+      "water_pump": {
+        "name": "Water pump"
+      }
+    },
+    "climate": {
+      "zone_1": {
+        "name": "Zone 1"
       }
     },
     "select": {
@@ -50,11 +64,38 @@
       }
     },
     "sensor": {
+      "compressor_status": {
+        "name": "Compressor status"
+      },
+      "dhw_target_temperature": {
+        "name": "Hot water target"
+      },
+      "energy_consumption": {
+        "name": "Energy consumption"
+      },
       "indoor_temperature": {
         "name": "Indoor temperature"
       },
       "outdoor_temperature": {
         "name": "Outdoor temperature"
+      },
+      "tfi_temperature": {
+        "name": "Floor heating inlet"
+      },
+      "tho_temperature": {
+        "name": "Water heater outlet"
+      },
+      "to_temperature": {
+        "name": "Outdoor temperature"
+      },
+      "twi_temperature": {
+        "name": "Water heat exchanger inlet"
+      },
+      "two_temperature": {
+        "name": "Water heat exchanger outlet"
+      },
+      "water_flow_rate": {
+        "name": "Water flow rate"
       }
     },
     "switch": {
@@ -72,6 +113,11 @@
       },
       "wireless_led": {
         "name": "Wireless LED"
+      }
+    },
+    "water_heater": {
+      "dhw": {
+        "name": "Hot water"
       }
     }
   }
