@@ -191,7 +191,10 @@ class ToshibaAcFeatures:
                 s_ac_swing_mode.append(ToshibaAcSwingMode.FIXED_3)
                 s_ac_swing_mode.append(ToshibaAcSwingMode.FIXED_4)
                 s_ac_swing_mode.append(ToshibaAcSwingMode.FIXED_5)
-                s_ac_swing_mode.append(ToshibaAcSwingMode.HADA)
+                # H.DA is NOT advertised here: no merit bit distinguishes
+                # H.DA-capable units (Daiseikai 10, 7c03/7c0f/7c1f) from e.g.
+                # Haori (7c02) which reports the same bit 14 without H.DA
+                # hardware. ToshibaAcDevice learns it from observed state.
 
             if merit_bits[15]:
                 s_ac_energy_report = True

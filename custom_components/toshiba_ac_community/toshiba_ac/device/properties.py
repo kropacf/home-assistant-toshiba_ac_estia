@@ -65,6 +65,26 @@ class ToshibaAcSwingMode(Enum):
     NONE = None
 
 
+class ToshibaAcVerticalSwingMode(Enum):
+    FIXED_1 = auto()
+    FIXED_2 = auto()
+    FIXED_3 = auto()
+    FIXED_4 = auto()
+    FIXED_5 = auto()
+    SWING = auto()
+    NONE = None
+
+
+class ToshibaAcHorizontalSwingMode(Enum):
+    FIXED_1 = auto()
+    FIXED_2 = auto()
+    FIXED_3 = auto()
+    FIXED_4 = auto()
+    FIXED_5 = auto()
+    SWING = auto()
+    NONE = None
+
+
 class ToshibaAcPowerSelection(Enum):
     POWER_50 = auto()
     POWER_75 = auto()

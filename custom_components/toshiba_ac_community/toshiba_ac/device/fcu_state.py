@@ -28,7 +28,9 @@ from ..device.properties import (
     ToshibaAcSelfCleaning,
     ToshibaAcWirelessLed,
     ToshibaAcStatus,
+    ToshibaAcHorizontalSwingMode,
     ToshibaAcSwingMode,
+    ToshibaAcVerticalSwingMode,
 )
 
 logger = logging.getLogger(__name__)
@@ -232,6 +234,67 @@ class ToshibaAcFcuState:
                 ToshibaAcSwingMode.HADA: 0x60,
                 ToshibaAcSwingMode.NONE: ToshibaAcFcuState.NONE_VAL,
             }[swing_mode]
+
+    class AcIndependentSwingMode:
+        # 2026 units (Shorai Curve) encode both vanes in one byte:
+        # 0x80 | horizontal << 3 | vertical, each axis 0 none, 1-5 fixed, 6 swing.
+        # See Toshiba-AC-control#2 for the reverse-engineered mapping.
+        _AXIS_VERTICAL = [
+            ToshibaAcVerticalSwingMode.NONE,
+            ToshibaAcVerticalSwingMode.FIXED_1,
+            ToshibaAcVerticalSwingMode.FIXED_2,
+            ToshibaAcVerticalSwingMode.FIXED_3,
+            ToshibaAcVerticalSwingMode.FIXED_4,
+            ToshibaAcVerticalSwingMode.FIXED_5,
+            ToshibaAcVerticalSwingMode.SWING,
+        ]
+        _AXIS_HORIZONTAL = [
+            ToshibaAcHorizontalSwingMode.NONE,
+            ToshibaAcHorizontalSwingMode.FIXED_1,
+            ToshibaAcHorizontalSwingMode.FIXED_2,
+            ToshibaAcHorizontalSwingMode.FIXED_3,
+            ToshibaAcHorizontalSwingMode.FIXED_4,
+            ToshibaAcHorizontalSwingMode.FIXED_5,
+            ToshibaAcHorizontalSwingMode.SWING,
+        ]
+        # Best-effort reading of legacy preset bytes as axis positions, so the
+        # per-axis properties are meaningful on every unit and after legacy sends.
+        _LEGACY_VERTICAL = {
+            0x41: ToshibaAcVerticalSwingMode.SWING,
+            0x43: ToshibaAcVerticalSwingMode.SWING,
+            0x50: ToshibaAcVerticalSwingMode.FIXED_1,
+            0x51: ToshibaAcVerticalSwingMode.FIXED_2,
+            0x52: ToshibaAcVerticalSwingMode.FIXED_3,
+            0x53: ToshibaAcVerticalSwingMode.FIXED_4,
+            0x54: ToshibaAcVerticalSwingMode.FIXED_5,
+        }
+        _LEGACY_HORIZONTAL = {
+            0x42: ToshibaAcHorizontalSwingMode.SWING,
+            0x43: ToshibaAcHorizontalSwingMode.SWING,
+        }
+
+        @staticmethod
+        def is_independent_raw(raw: int) -> bool:
+            return 0x80 <= raw <= 0xB6 and raw & 0x07 <= 0x06 and (raw & 0x38) >> 3 <= 0x06
+
+        @staticmethod
+        def vertical_from_raw(raw: int) -> ToshibaAcVerticalSwingMode:
+            codec = ToshibaAcFcuState.AcIndependentSwingMode
+            if codec.is_independent_raw(raw):
+                return codec._AXIS_VERTICAL[raw & 0x07]
+            return codec._LEGACY_VERTICAL.get(raw, ToshibaAcVerticalSwingMode.NONE)
+
+        @staticmethod
+        def horizontal_from_raw(raw: int) -> ToshibaAcHorizontalSwingMode:
+            codec = ToshibaAcFcuState.AcIndependentSwingMode
+            if codec.is_independent_raw(raw):
+                return codec._AXIS_HORIZONTAL[(raw & 0x38) >> 3]
+            return codec._LEGACY_HORIZONTAL.get(raw, ToshibaAcHorizontalSwingMode.NONE)
+
+        @staticmethod
+        def to_raw(vertical: ToshibaAcVerticalSwingMode, horizontal: ToshibaAcHorizontalSwingMode) -> int:
+            codec = ToshibaAcFcuState.AcIndependentSwingMode
+            return 0x80 | codec._AXIS_HORIZONTAL.index(horizontal) << 3 | codec._AXIS_VERTICAL.index(vertical)
 
     class AcPowerSelection:
         @staticmethod
@@ -555,6 +618,23 @@ class ToshibaAcFcuState:
         self._ac_swing_mode = ToshibaAcFcuState.AcSwingMode.to_raw(val)
 
     @property
+    def uses_independent_swing(self) -> bool:
+        return ToshibaAcFcuState.AcIndependentSwingMode.is_independent_raw(self._ac_swing_mode)
+
+    @property
+    def ac_vertical_swing_mode(self) -> ToshibaAcVerticalSwingMode:
+        return ToshibaAcFcuState.AcIndependentSwingMode.vertical_from_raw(self._ac_swing_mode)
+
+    @property
+    def ac_horizontal_swing_mode(self) -> ToshibaAcHorizontalSwingMode:
+        return ToshibaAcFcuState.AcIndependentSwingMode.horizontal_from_raw(self._ac_swing_mode)
+
+    def set_ac_independent_swing(
+        self, vertical: ToshibaAcVerticalSwingMode, horizontal: ToshibaAcHorizontalSwingMode
+    ) -> None:
+        self._ac_swing_mode = ToshibaAcFcuState.AcIndependentSwingMode.to_raw(vertical, horizontal)
+
+    @property
     def ac_power_selection(self) -> ToshibaAcPowerSelection:
         return ToshibaAcFcuState.AcPowerSelection.from_raw(self._ac_power_selection)
 
@@ -624,6 +704,8 @@ class ToshibaAcFcuState:
         res += f", AcTemperature: {self.ac_temperature}"
         res += f", AcFanMode: {self.ac_fan_mode.name}"
         res += f", AcSwingMode: {self.ac_swing_mode.name}"
+        if self.uses_independent_swing:
+            res += f" (vertical: {self.ac_vertical_swing_mode.name}, horizontal: {self.ac_horizontal_swing_mode.name})"
         res += f", AcPowerSelection: {self.ac_power_selection.name}"
         res += f", AcFeatureMeritB: {self.ac_merit_b.name}"
         res += f", AcFeatureMeritA: {self.ac_merit_a.name}"

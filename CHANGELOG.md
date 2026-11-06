@@ -2,9 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
-## [2026.8.4.1] - 2026-11-06
+## [2026.10.0.1] - 2026-11-06
 
-Fork release ([kropacf/home-assistant-toshiba_ac_estia](https://github.com/kropacf/home-assistant-toshiba_ac_estia)) based on 2026.8.4.
+Fork release ([kropacf/home-assistant-toshiba_ac_estia](https://github.com/kropacf/home-assistant-toshiba_ac_estia)) based on 2026.10.0.
 
 ### Added - Toshiba Estia heat pumps
 
@@ -12,7 +12,27 @@ Estia units on the account now get read-only entities: a Zone 1 climate entity, 
 
 ### Changed - protocol library is vendored
 
-The `toshiba_ac` library (`toshiba-ac-community` 0.7.2 plus Estia support) now ships inside the integration at `custom_components/toshiba_ac_community/toshiba_ac/` and is no longer installed from PyPI. Its tests live in `tests/toshiba_ac/`.
+The `toshiba_ac` library (`toshiba-ac-community` 0.8.0 plus Estia support) now ships inside the integration at `custom_components/toshiba_ac_community/toshiba_ac/` and is no longer installed from PyPI. Its tests live in `tests/toshiba_ac/`.
+
+## [2026.10.0] - 2026-10-29
+
+This release bundles protocol library **`toshiba-ac-community` 0.8.0**.
+
+### Added - horizontal swing control for 2026 Shorai Curve units
+
+The climate entity gains Home Assistant's native horizontal swing selector (Off, Fixed 1-5, Swing) on units that report the independent-axis swing encoding ([Toshiba-AC-control#2](https://github.com/vmvelev/Toshiba-AC-control/issues/2), [#34](https://github.com/vmvelev/home-assistant-toshiba_ac/pull/34)). Support is detected from observed state, so after a fresh start the selector appears once the unit has reported its vanes - changing the swing once from the Toshiba app forces that. Vertical changes from Home Assistant use the per-axis command too, so the horizontal vane keeps its position. Units without the new encoding are unchanged. Thanks to [@devcide](https://github.com/devcide) for the protocol work and to [@harmpert](https://github.com/harmpert) and [@simontaen](https://github.com/simontaen) for testing the betas on real hardware.
+
+### Fixed - no longer breaks when the original Toshiba AC integration is installed alongside
+
+The protocol library's import name changed from `toshiba_ac` to `toshiba_ac_community`. Both `toshiba-ac` (used by the original h4de5 integration) and `toshiba-ac-community` installed into the same `toshiba_ac` folder, so whichever was installed last overwrote the other and this integration failed with `unexpected keyword argument 'access_token'` ([#46](https://github.com/vmvelev/home-assistant-toshiba_ac/issues/46)). If you saw that error, remove the old integration and rebuild or update Home Assistant Core once so the library is reinstalled cleanly.
+
+### Fixed - a malformed heartbeat value no longer drops the whole heartbeat
+
+Toshiba's cloud sometimes sends an empty value in a heartbeat. The library decoded the whole message at once, so one bad field raised `struct.error` and the entire heartbeat was lost, which left the outdoor temperature stale or `unavailable` ([Toshiba-AC-control#18](https://github.com/vmvelev/Toshiba-AC-control/issues/18), [#45](https://github.com/vmvelev/home-assistant-toshiba_ac/issues/45)). Each value is now decoded on its own and only malformed ones are skipped. Contributed by [@jupegarnica](https://github.com/jupegarnica) in [Toshiba-AC-control#19](https://github.com/vmvelev/Toshiba-AC-control/pull/19).
+
+### Fixed - H.DA mode is no longer offered on units that lack it
+
+Haori units set the merit bit that was used to advertise H.DA, so the mode showed up without working. H.DA is now learned from the unit's reported state instead ([Toshiba-AC-control#14](https://github.com/vmvelev/Toshiba-AC-control/pull/14)). Reported by [@felixmueller](https://github.com/felixmueller).
 
 ## [2026.8.4] - 2026-08-29
 

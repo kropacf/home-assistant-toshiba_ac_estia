@@ -1,4 +1,4 @@
 -r requirements.txt
-homeassistant==2026.1.2
+homeassistant==2026.10.4
 # git+https://github.com/home-assistant/core.git@2026.1.2#egg=homeassistant
 pre-commit

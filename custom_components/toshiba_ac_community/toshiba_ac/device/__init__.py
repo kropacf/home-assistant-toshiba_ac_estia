@@ -31,8 +31,10 @@ from ..device.properties import (
     ToshibaAcMode,
     ToshibaAcPowerSelection,
     ToshibaAcSelfCleaning,
+    ToshibaAcHorizontalSwingMode,
     ToshibaAcStatus,
     ToshibaAcSwingMode,
+    ToshibaAcVerticalSwingMode,
     ToshibaAcWirelessLed,
 )
 from ..utils import async_sleep_until_next_multiply_of_minutes, pretty_enum_name, ToshibaAcCallback
@@ -84,6 +86,7 @@ class ToshibaAcDevice:
         self.cdu: t.Optional[str] = None
         self.fcu: t.Optional[str] = None
         self._supported = ToshibaAcFeatures.from_merit_string_and_model(merit_feature, ac_model_id)
+        self._seen_independent_swing = False
         self._on_state_changed_callback = ToshibaAcDeviceCallback()
         self._on_energy_consumption_changed_callback = ToshibaAcDeviceCallback()
         self._ac_energy_consumption: t.Optional[ToshibaAcDeviceEnergyConsumption] = None
@@ -126,6 +129,8 @@ class ToshibaAcDevice:
             await self.state_changed()
 
     async def state_changed(self) -> None:
+        if self.fcu_state.uses_independent_swing:
+            self._seen_independent_swing = True
         logger.info(f"[{self.name}] Current state: {self.fcu_state}")
         await self.on_state_changed_callback(self)
 
@@ -150,8 +155,30 @@ class ToshibaAcDevice:
             await self.state_changed()
 
     async def handle_cmd_heartbeat(self, payload: dict[str, t.Any]) -> None:
-        # Use signed conversion for temperatures, unsigned otherwise.
-        hb_data = {k: struct.unpack("b" if "Temp" in k else "B", bytes.fromhex(v))[0] for k, v in payload.items()}
+        # Every heartbeat value is a single hex byte, but the cloud can send an
+        # empty or otherwise malformed value ("Power" was observed empty).
+        # Decoding the whole payload at once then raises and the entire message
+        # is lost, so every value is decoded on its own and only the malformed
+        # ones are dropped. Use signed conversion for temperatures, unsigned
+        # otherwise.
+        hb_data: dict[str, int] = {}
+        dropped: list[str] = []
+        for key, value in payload.items():
+            try:
+                raw = bytes.fromhex(value)
+                if len(raw) != 1:
+                    raise ValueError(f"expected 1 byte, got {len(raw)}")
+                hb_data[key] = struct.unpack("b" if "Temp" in key else "B", raw)[0]
+            except (TypeError, ValueError, struct.error):
+                dropped.append(key)
+
+        if dropped:
+            logger.debug(f"[{self.name}] AC heartbeat: dropped malformed values: {dropped}")
+
+        if not hb_data:
+            logger.debug(f"[{self.name}] AC heartbeat with no valid values, ignoring")
+            return
+
         logger.debug(f"[{self.name}] AC heartbeat from AMQP: {hb_data}")
 
         if self.fcu_state.update_from_hbt(hb_data):
@@ -326,6 +353,45 @@ class ToshibaAcDevice:
         await self.send_state_to_ac(state)
 
     @property
+    def supports_independent_swing(self) -> bool:
+        # Sticky: units report legacy bytes again after receiving a legacy preset
+        # command, but the capability itself does not go away. Sending legacy
+        # commands successfully proves nothing (see #2), so observing the
+        # independent encoding at least once is the only reliable signal.
+        if not self._seen_independent_swing and self.fcu_state.uses_independent_swing:
+            self._seen_independent_swing = True
+        return self._seen_independent_swing
+
+    @property
+    def ac_vertical_swing_mode(self) -> ToshibaAcVerticalSwingMode:
+        return self.fcu_state.ac_vertical_swing_mode
+
+    async def set_ac_vertical_swing_mode(self, val: ToshibaAcVerticalSwingMode) -> None:
+        await self._set_independent_swing(val, self.ac_horizontal_swing_mode)
+
+    @property
+    def ac_horizontal_swing_mode(self) -> ToshibaAcHorizontalSwingMode:
+        return self.fcu_state.ac_horizontal_swing_mode
+
+    async def set_ac_horizontal_swing_mode(self, val: ToshibaAcHorizontalSwingMode) -> None:
+        await self._set_independent_swing(self.ac_vertical_swing_mode, val)
+
+    async def _set_independent_swing(
+        self, vertical: ToshibaAcVerticalSwingMode, horizontal: ToshibaAcHorizontalSwingMode
+    ) -> None:
+        if not self.supports_independent_swing:
+            logger.warning(
+                f"[{self.name}] Trying to set independent swing on a device that "
+                "has not reported the independent-axis encoding"
+            )
+            return
+
+        state = ToshibaAcFcuState()
+        state.set_ac_independent_swing(vertical, horizontal)
+
+        await self.send_state_to_ac(state)
+
+    @property
     def ac_power_selection(self) -> ToshibaAcPowerSelection:
         return self.fcu_state.ac_power_selection
 
@@ -401,4 +467,14 @@ class ToshibaAcDevice:
 
     @property
     def supported(self) -> ToshibaAcFeatures:
+        # H.DA has no merit feature bit (Haori units report the same bits
+        # without the hardware), so it is learned from the unit reporting it,
+        # e.g. set once from the IR remote or the Toshiba app. Sticky like
+        # supports_independent_swing: observed once = supported.
+        if (
+            self.fcu_state.ac_swing_mode == ToshibaAcSwingMode.HADA
+            and ToshibaAcSwingMode.HADA not in self._supported.ac_swing_mode
+        ):
+            logger.info(f"[{self.name}] Detected H.DA support")
+            self._supported.ac_swing_mode.append(ToshibaAcSwingMode.HADA)
         return self._supported

@@ -45,7 +45,7 @@ GitHub Actions validation:
 ## Dependencies
 
 ### Vendored Library
-The `toshiba_ac` library is **vendored** in `custom_components/toshiba_ac_community/toshiba_ac/`: `toshiba-ac-community` 0.7.2 (`github.com/vmvelev/Toshiba-AC-control`, forked from `github.com/KaSroka/Toshiba-AC-control`, Apache-2.0) plus Estia support (`device/estia.py`, `device/estia_fcu_state.py`):
+The `toshiba_ac` library is **vendored** in `custom_components/toshiba_ac_community/toshiba_ac/`: `toshiba-ac-community` 0.8.0 (`github.com/vmvelev/Toshiba-AC-control`, forked from `github.com/KaSroka/Toshiba-AC-control`, Apache-2.0) plus Estia support (`device/estia.py`, `device/estia_fcu_state.py`):
 - Handles authentication with Toshiba cloud HTTP API
 - Manages Azure AMQP connection for real-time device state updates
 - Provides `ToshibaAcDeviceManager`, `ToshibaAcDevice` and `ToshibaEstiaDevice` classes
@@ -54,7 +54,7 @@ Inside the vendored package all imports are relative; the integration imports it
 
 ### Requirements Files
 - `requirements.txt` - Runtime: `azure-iot-device==2.15.0rc1`, `janus==1.0.0` (same pins as manifest.json; the library itself is vendored)
-- `requirements_dev.txt` - Development: `homeassistant==2026.1.2` + pre-commit
+- `requirements_dev.txt` - Development: `homeassistant==2026.10.4` + pre-commit
 
 ## Home Assistant Imports
 
