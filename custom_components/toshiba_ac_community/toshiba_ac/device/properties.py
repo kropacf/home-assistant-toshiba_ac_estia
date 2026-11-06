@@ -15,7 +15,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime
-from enum import Enum, auto
+from enum import Enum, IntFlag, auto
 import typing as t
 
 
@@ -159,3 +159,33 @@ class EstiaWaterTemperatures:
     tho: t.Optional[int] = None
     to: t.Optional[int] = None
     tfi: t.Optional[int] = None
+
+
+class EstiaFunctionFlag(IntFlag):
+    """Bits of the Estia function register, command byte 10.
+
+    The status string reports the same bits in byte 19, except AUTO, which is
+    reported per zone in bytes 11 and 18. 0x04, 0x40 and 0x80 have never been
+    observed and their meaning is unknown.
+    """
+
+    AUTO = 0x01
+    FROST_PROTECTION = 0x02
+    NIGHT_SETBACK = 0x08
+    DHW_BOOST = 0x10
+    ANTI_BACTERIAL = 0x20
+
+
+@dataclass
+class EstiaSetpointLimits:
+    """Setpoint ranges from the device record, in degrees Celsius.
+
+    None means the record did not carry the field.
+    """
+
+    dhw_min: t.Optional[float] = None
+    dhw_max: t.Optional[float] = None
+    zone1_heat_min: t.Optional[float] = None
+    zone1_heat_max: t.Optional[float] = None
+    zone2_heat_min: t.Optional[float] = None
+    zone2_heat_max: t.Optional[float] = None

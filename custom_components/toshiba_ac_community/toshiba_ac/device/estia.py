@@ -18,9 +18,12 @@ import asyncio
 import logging
 import typing as t
 
+from ..device.estia_command import ToshibaEstiaCommand
 from ..device.estia_fcu_state import ToshibaEstiaFcuState
 from ..device.properties import (
     EstiaCompressorStatus,
+    EstiaFunctionFlag,
+    EstiaSetpointLimits,
     EstiaWaterMode,
     EstiaWaterTemperatures,
     ToshibaAcDeviceEnergyConsumption,
@@ -32,6 +35,10 @@ from ..utils.http_api import ToshibaAcHttpApi
 logger = logging.getLogger(__name__)
 
 
+class ToshibaEstiaDeviceError(Exception):
+    pass
+
+
 class ToshibaEstiaDeviceCallback(ToshibaAcCallback["ToshibaEstiaDevice"]):
     pass
 
@@ -39,8 +46,9 @@ class ToshibaEstiaDeviceCallback(ToshibaAcCallback["ToshibaEstiaDevice"]):
 class ToshibaEstiaDevice:
     """An Estia air-to-water heat pump on the Toshiba cloud.
 
-    Read-only: Toshiba's mobile protocol for writing to an Estia unit has not been
-    reverse engineered, so this class exposes state and never sends commands.
+    Commands go out the way the Toshiba app sends them: CMD_HDU_TO_ESTIA over
+    the REST command endpoint, see ToshibaEstiaCommand for the payload. The unit
+    answers each one with a status diff that arrives like any other state push.
 
     State arrives from three places, and the first two overlap almost entirely:
       - the status string, over AMQP (CMD_HDU_FROM_ESTIA) and from the state
@@ -56,6 +64,16 @@ class ToshibaEstiaDevice:
     """
 
     STATE_RELOAD_PERIOD_MINUTES = 30
+
+    COMMAND = "CMD_HDU_TO_ESTIA"
+
+    # Used until the device record has been read, or when it lacks the limits.
+    # They match the ranges in the Estia installation manual and the record of
+    # the unit the protocol was captured from.
+    DEFAULT_DHW_MIN = 40.0
+    DEFAULT_DHW_MAX = 75.0
+    DEFAULT_ZONE_HEAT_MIN = 20.0
+    DEFAULT_ZONE_HEAT_MAX = 65.0
 
     def __init__(
         self,
@@ -88,6 +106,7 @@ class ToshibaEstiaDevice:
         self.cdu: t.Optional[str] = None
         self.fcu: t.Optional[str] = None
         self.serial_number: t.Optional[str] = None
+        self.limits = EstiaSetpointLimits()
 
         self._water_flow_rate: t.Optional[int] = None
         self._is_online = False
@@ -98,6 +117,10 @@ class ToshibaEstiaDevice:
 
         self.periodic_reload_state_task: t.Optional[asyncio.Task[None]] = None
         self.load_additional_device_info_task: t.Optional[asyncio.Task[None]] = None
+
+        # Serialises commands that rewrite the function register, so that two
+        # quick toggles cannot both be built from the same old state
+        self._command_lock = asyncio.Lock()
 
     async def connect(self) -> None:
         self.load_additional_device_info_task = asyncio.create_task(self._load_additional_device_info_deferred())
@@ -128,6 +151,7 @@ class ToshibaEstiaDevice:
         self.fcu = additional_info.fcu
         self.serial_number = additional_info.serial_number
         self.temperatures = additional_info.temperatures
+        self.limits = additional_info.limits
 
         await self.on_state_changed_callback(self)
 
@@ -206,6 +230,89 @@ class ToshibaEstiaDevice:
 
             await self.on_energy_consumption_changed_callback(self)
 
+    async def send_command(self, command: ToshibaEstiaCommand) -> None:
+        data = command.encode()
+        logger.debug(f"[{self.name}] Sending command: {command} ({data})")
+        await self.http_api.send_command(self.device_id, self.ac_unique_id, self.COMMAND, data)
+
+    async def set_dhw_on(self, on: bool) -> None:
+        await self.send_command(ToshibaEstiaCommand(dhw_on=on))
+
+    async def set_dhw_target_temperature(self, temperature: float) -> None:
+        self._check_range("hot water target", temperature, self.dhw_min_temperature, self.dhw_max_temperature)
+        await self.send_command(ToshibaEstiaCommand(dhw_target_temperature=temperature))
+
+    async def set_heating_on(self, on: bool) -> None:
+        """Switch space heating on or off, for zone 1 and zone 2 together.
+
+        The unit has one switch for both zones; there is no known way to switch
+        a single zone.
+        """
+        await self.send_command(ToshibaEstiaCommand(heating_on=on))
+
+    async def set_zone1_target_temperature(self, temperature: float) -> None:
+        self._check_range(
+            "zone 1 target", temperature, self.zone1_min_temperature, self.zone1_max_temperature
+        )
+        await self.send_command(ToshibaEstiaCommand(zone1_target_temperature=temperature))
+
+    async def set_zone2_target_temperature(self, temperature: float) -> None:
+        self._check_range(
+            "zone 2 target", temperature, self.zone2_min_temperature, self.zone2_max_temperature
+        )
+        await self.send_command(ToshibaEstiaCommand(zone2_target_temperature=temperature))
+
+    async def set_auto_mode(self, on: bool) -> None:
+        """Switch the heating curve on or off, for both zones.
+
+        Switching back to manual re-sends the zone 1 setpoint, as the Toshiba
+        app does.
+        """
+        zone1_target = None if on else self.zone1_target_temperature
+        await self._set_function_flag(EstiaFunctionFlag.AUTO, on, zone1_target_temperature=zone1_target)
+
+    async def set_function(self, flag: EstiaFunctionFlag, on: bool) -> None:
+        """Switch frost protection, night setback, DHW boost or anti-bacterial."""
+        if flag == EstiaFunctionFlag.AUTO:
+            await self.set_auto_mode(on)
+            return
+
+        await self._set_function_flag(flag, on)
+
+    async def _set_function_flag(
+        self,
+        flag: EstiaFunctionFlag,
+        on: bool,
+        zone1_target_temperature: t.Optional[float] = None,
+    ) -> None:
+        async with self._command_lock:
+            try:
+                register = self.fcu_state.function_register()
+            except ValueError as e:
+                raise ToshibaEstiaDeviceError(f"[{self.name}] Refusing to rewrite the function register: {e}") from e
+
+            register = register | int(flag) if on else register & ~int(flag)
+
+            await self.send_command(
+                ToshibaEstiaCommand(function_register=register, zone1_target_temperature=zone1_target_temperature)
+            )
+
+            # The unit acknowledges within a second, but a second toggle can come
+            # sooner and would be built from the old register, undoing this one.
+            # So apply what the unit will report right away: byte 19 carries the
+            # functions, bytes 11 and 18 the per-zone auto flag. A rejected command
+            # is corrected by the next full state reload.
+            auto = "01" if register & int(EstiaFunctionFlag.AUTO) else "00"
+            functions = f"{register & ToshibaEstiaFcuState.STATUS_FUNCTION_FLAGS:02x}"
+            expected = "ff" * 10 + auto + "ff" * 6 + auto + functions
+
+            if self.fcu_state.update(expected):
+                await self.state_changed()
+
+    def _check_range(self, what: str, value: float, low: float, high: float) -> None:
+        if not low <= value <= high:
+            raise ToshibaEstiaDeviceError(f"[{self.name}] {what} {value} is outside {low} - {high}")
+
     @property
     def zone1_mode(self) -> EstiaWaterMode:
         return self.fcu_state.zone1_mode
@@ -219,11 +326,84 @@ class ToshibaEstiaDevice:
         return self.fcu_state.dhw_target_temperature
 
     @property
+    def dhw_is_enabled(self) -> bool:
+        return self.fcu_state.dhw_is_enabled
+
+    @property
+    def zone1_is_on(self) -> bool:
+        return self.fcu_state.zone1_is_on
+
+    @property
+    def has_zone2(self) -> bool:
+        return self.fcu_state.has_zone2
+
+    @property
+    def zone2_is_on(self) -> bool:
+        return self.fcu_state.zone2_is_on
+
+    @property
+    def zone2_mode(self) -> EstiaWaterMode:
+        return self.fcu_state.zone2_mode
+
+    @property
+    def zone2_target_temperature(self) -> t.Optional[float]:
+        return self.fcu_state.zone2_target_temperature
+
+    @property
+    def auto_mode(self) -> t.Optional[bool]:
+        """Return whether the heating curve is on, None if not reported."""
+        return self.fcu_state.zone1_auto
+
+    def function_is_on(self, flag: EstiaFunctionFlag) -> bool:
+        if flag == EstiaFunctionFlag.AUTO:
+            return bool(self.auto_mode)
+
+        return self.fcu_state.has_function_flag(flag)
+
+    @property
+    def dhw_min_temperature(self) -> float:
+        return _limit(self.limits.dhw_min, self.DEFAULT_DHW_MIN)
+
+    @property
+    def dhw_max_temperature(self) -> float:
+        return _limit(self.limits.dhw_max, self.DEFAULT_DHW_MAX)
+
+    @property
+    def zone1_min_temperature(self) -> float:
+        return _limit(self.limits.zone1_heat_min, self.DEFAULT_ZONE_HEAT_MIN)
+
+    @property
+    def zone1_max_temperature(self) -> float:
+        return _limit(self.limits.zone1_heat_max, self.DEFAULT_ZONE_HEAT_MAX)
+
+    @property
+    def zone2_min_temperature(self) -> float:
+        return _limit(self.limits.zone2_heat_min, self.DEFAULT_ZONE_HEAT_MIN)
+
+    @property
+    def zone2_max_temperature(self) -> float:
+        return _limit(self.limits.zone2_heat_max, self.DEFAULT_ZONE_HEAT_MAX)
+
+    @property
+    def zone1_outdoor_unit_is_active(self) -> bool:
+        return self.fcu_state.zone1_outdoor_unit_is_active
+
+    @property
+    def zone2_outdoor_unit_is_active(self) -> bool:
+        return self.fcu_state.zone2_outdoor_unit_is_active
+
+    @property
+    def zone2_electric_coil_is_active(self) -> bool:
+        return self.fcu_state.zone2_electric_coil_is_active
+
+    @property
     def compressor_status(self) -> EstiaCompressorStatus:
         return self.fcu_state.compressor_status
 
     @property
     def water_pump_status(self) -> bool:
+        # Status byte 20; whether it really means "pump running" is doubtful,
+        # see ToshibaEstiaFcuState.decode
         return self.fcu_state.water_pump_is_running
 
     @property
@@ -296,3 +476,7 @@ def _parse_hex(value: t.Any) -> t.Optional[int]:
     except ValueError:
         logger.warning(f"Ignoring malformed hex value in Estia heartbeat: {value!r}")
         return None
+
+
+def _limit(value: t.Optional[float], default: float) -> float:
+    return default if value is None else value

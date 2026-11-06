@@ -30,7 +30,7 @@ from .toshiba_ac.device import (
     ToshibaAcVerticalSwingMode,
 )
 from .toshiba_ac.device.estia import ToshibaEstiaDevice
-from .toshiba_ac.device.properties import EstiaCompressorStatus, EstiaWaterMode
+from .toshiba_ac.device.properties import EstiaWaterMode
 from .toshiba_ac.utils import pretty_enum_name
 
 _LOGGER = logging.getLogger(__name__)
@@ -81,7 +81,10 @@ async def async_setup_entry(hass, config_entry, async_add_devices):
     new_entities = [ToshibaClimate(device) for device in devices]
 
     estia_devices = await device_manager.get_estia_devices()
-    new_entities.extend(ToshibaEstiaHeatingZone(device) for device in estia_devices)
+    for estia_device in estia_devices:
+        new_entities.append(ToshibaEstiaHeatingZone(estia_device))
+        if estia_device.has_zone2:
+            new_entities.append(ToshibaEstiaHeatingZone2(estia_device))
 
     if new_entities:
         _LOGGER.info("Adding %d climate entities", len(new_entities))
@@ -357,15 +360,20 @@ class ToshibaClimate(ToshibaAcStateEntity, ClimateEntity):
 
 
 class ToshibaEstiaHeatingZone(ToshibaEstiaStateEntity, ClimateEntity):
-    """The space heating zone of a Toshiba Estia heat pump.
+    """The space heating zone 1 of a Toshiba Estia heat pump.
 
-    Read-only: Toshiba's protocol for writing to an Estia unit has not been
-    reverse engineered, so no feature flag is advertised and the entity exposes
-    no setters. Use the Toshiba app or the wall controller to change anything.
+    Sets the zone's water target and switches space heating on or off. The
+    unit has a single on/off switch for both zones, so turning this entity off
+    (or on) turns zone 2 off (or on) as well. The heating curve (auto mode) is
+    a separate switch entity, because it too applies to both zones.
     """
 
     _attr_translation_key = "zone_1"
-    _attr_supported_features = ClimateEntityFeature(0)
+    _attr_supported_features = (
+        ClimateEntityFeature.TARGET_TEMPERATURE
+        | ClimateEntityFeature.TURN_ON
+        | ClimateEntityFeature.TURN_OFF
+    )
     _attr_target_temperature_step = 1
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
 
@@ -375,18 +383,42 @@ class ToshibaEstiaHeatingZone(ToshibaEstiaStateEntity, ClimateEntity):
         self._attr_unique_id = f"{self._device.ac_unique_id}_climate"
 
     @property
+    def _is_on(self) -> bool:
+        return self._device.zone1_is_on
+
+    @property
+    def _mode(self) -> EstiaWaterMode:
+        return self._device.zone1_mode
+
+    @property
+    def _is_working(self) -> bool:
+        return (
+            self._device.zone1_outdoor_unit_is_active
+            or self._device.electric_coil_heat_is_active
+        )
+
+    @property
+    def _on_mode(self) -> HVACMode:
+        """Return the mode the zone runs in when on.
+
+        On/off is all that can be switched; the operating mode (heat or cool)
+        is set on the unit, so the zone reports whatever mode that is.
+        """
+        mode = ESTIA_WATER_MODE_TO_HVAC_MODE.get(self._mode, HVACMode.OFF)
+        return HVACMode.HEAT if mode == HVACMode.OFF else mode
+
+    @property
     def hvac_mode(self) -> HVACMode:
-        """Return the mode the water circuit is operating in."""
-        return ESTIA_WATER_MODE_TO_HVAC_MODE.get(self._device.zone1_mode, HVACMode.OFF)
+        """Return the mode the zone is operating in."""
+        if not self._is_on:
+            return HVACMode.OFF
+
+        return self._on_mode
 
     @property
     def hvac_modes(self) -> list[HVACMode]:
-        """Return the selectable modes, of which there are none.
-
-        Reporting only the current mode keeps the frontend from offering a
-        switch that cannot be honoured.
-        """
-        return [self.hvac_mode]
+        """Return the selectable modes: on in the unit's mode, or off."""
+        return [self._on_mode, HVACMode.OFF]
 
     @property
     def hvac_action(self) -> HVACAction:
@@ -395,18 +427,13 @@ class ToshibaEstiaHeatingZone(ToshibaEstiaStateEntity, ClimateEntity):
         Only work done for space conditioning counts: the compressor also runs
         for hot water, and that is the water heater entity's business.
         """
-        if self._device.zone1_mode == EstiaWaterMode.NONE:
+        if not self._is_on or self._mode == EstiaWaterMode.NONE:
             return HVACAction.OFF
 
-        working = (
-            self._device.compressor_status == EstiaCompressorStatus.HEAT
-            or self._device.electric_coil_heat_is_active
-        )
-
-        if not working:
+        if not self._is_working:
             return HVACAction.IDLE
 
-        if self._device.zone1_mode == EstiaWaterMode.COOL:
+        if self._mode == EstiaWaterMode.COOL:
             return HVACAction.COOLING
 
         return HVACAction.HEATING
@@ -428,9 +455,86 @@ class ToshibaEstiaHeatingZone(ToshibaEstiaStateEntity, ClimateEntity):
     @property
     def min_temp(self) -> float:
         """Return the minimum temperature."""
-        return 20
+        return self._device.zone1_min_temperature
 
     @property
     def max_temp(self) -> float:
         """Return the maximum temperature."""
-        return 40
+        return self._device.zone1_max_temperature
+
+    async def _async_set_target(self, temperature: float) -> None:
+        await self._device.set_zone1_target_temperature(temperature)
+
+    async def async_set_temperature(self, **kwargs: Any) -> None:
+        """Set the water target of the zone."""
+        if (temperature := kwargs.get(ATTR_TEMPERATURE)) is None:
+            return
+
+        await self._async_command(self._async_set_target(temperature))
+
+    async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
+        """Switch space heating on or off - for both zones."""
+        await self._async_command(
+            self._device.set_heating_on(hvac_mode != HVACMode.OFF)
+        )
+
+    async def async_turn_on(self) -> None:
+        """Switch space heating on - for both zones."""
+        await self.async_set_hvac_mode(self._on_mode)
+
+    async def async_turn_off(self) -> None:
+        """Switch space heating off - for both zones."""
+        await self.async_set_hvac_mode(HVACMode.OFF)
+
+
+class ToshibaEstiaHeatingZone2(ToshibaEstiaHeatingZone):
+    """The space heating zone 2 of a Toshiba Estia heat pump.
+
+    Created only when the unit reports a second zone. Its target is its own,
+    but on/off is shared with zone 1: switching either entity switches both.
+    """
+
+    _attr_translation_key = "zone_2"
+
+    def __init__(self, toshiba_device: ToshibaEstiaDevice):
+        """Initialize the climate entity."""
+        super().__init__(toshiba_device)
+        self._attr_unique_id = f"{self._device.ac_unique_id}_climate_zone2"
+
+    @property
+    def _is_on(self) -> bool:
+        return self._device.zone2_is_on
+
+    @property
+    def _mode(self) -> EstiaWaterMode:
+        return self._device.zone2_mode
+
+    @property
+    def _is_working(self) -> bool:
+        return (
+            self._device.zone2_outdoor_unit_is_active
+            or self._device.zone2_electric_coil_is_active
+        )
+
+    @property
+    def current_temperature(self) -> float | None:
+        """Return None: the heat pump has no sensor for the zone 2 circuit."""
+        return None
+
+    @property
+    def target_temperature(self) -> float | None:
+        """Return the water temperature the zone is set to reach."""
+        return self._device.zone2_target_temperature
+
+    @property
+    def min_temp(self) -> float:
+        """Return the minimum temperature."""
+        return self._device.zone2_min_temperature
+
+    @property
+    def max_temp(self) -> float:
+        """Return the maximum temperature."""
+        return self._device.zone2_max_temperature
+
+    async def _async_set_target(self, temperature: float) -> None:
+        await self._device.set_zone2_target_temperature(temperature)

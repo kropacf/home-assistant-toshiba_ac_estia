@@ -15,7 +15,7 @@ from homeassistant.components.switch import (
 from homeassistant.const import EntityCategory
 
 from .const import DOMAIN
-from .entity import ToshibaAcStateEntity
+from .entity import ToshibaAcStateEntity, ToshibaEstiaStateEntity
 from .entity_description import ToshibaAcEnumEntityDescriptionMixin
 from .toshiba_ac.device import (
     ToshibaAcAirPureIon,
@@ -25,6 +25,8 @@ from .toshiba_ac.device import (
     ToshibaAcStatus,
     ToshibaAcWirelessLed,
 )
+from .toshiba_ac.device.estia import ToshibaEstiaDevice
+from .toshiba_ac.device.properties import EstiaFunctionFlag
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -164,6 +166,53 @@ _SWITCH_DESCRIPTIONS: Sequence[ToshibaAcSwitchDescription] = [
 ]
 
 
+@dataclass(frozen=True, kw_only=True)
+class ToshibaEstiaSwitchDescription(SwitchEntityDescription):
+    """Describe a switch for one bit of the Estia function register."""
+
+    flag: EstiaFunctionFlag
+
+
+# All of these live in one register that the unit rewrites as a whole, so every
+# toggle re-sends the current state of the others (see ToshibaEstiaDevice).
+ESTIA_SWITCHES: tuple[ToshibaEstiaSwitchDescription, ...] = (
+    ToshibaEstiaSwitchDescription(
+        # Applies to both zones: the unit has a single auto flag in commands
+        key="auto_mode",
+        translation_key="heating_curve",
+        icon="mdi:chart-bell-curve-cumulative",
+        flag=EstiaFunctionFlag.AUTO,
+    ),
+    ToshibaEstiaSwitchDescription(
+        key="night_setback",
+        translation_key="night_setback",
+        icon="mdi:weather-night",
+        flag=EstiaFunctionFlag.NIGHT_SETBACK,
+    ),
+    ToshibaEstiaSwitchDescription(
+        # Runs the electric immersion heater, hence the explicit name
+        key="dhw_boost",
+        translation_key="dhw_boost",
+        icon="mdi:water-boiler-alert",
+        flag=EstiaFunctionFlag.DHW_BOOST,
+    ),
+    ToshibaEstiaSwitchDescription(
+        key="frost_protection",
+        translation_key="frost_protection",
+        icon="mdi:snowflake-thermometer",
+        entity_category=EntityCategory.CONFIG,
+        flag=EstiaFunctionFlag.FROST_PROTECTION,
+    ),
+    ToshibaEstiaSwitchDescription(
+        key="anti_bacterial",
+        translation_key="anti_bacterial",
+        icon="mdi:bacteria-outline",
+        entity_category=EntityCategory.CONFIG,
+        flag=EstiaFunctionFlag.ANTI_BACTERIAL,
+    ),
+)
+
+
 async def async_setup_entry(hass, config_entry, async_add_devices):
     """Add switch entities for passed config_entry in HA."""
     device_manager = hass.data[DOMAIN][config_entry.entry_id]
@@ -180,6 +229,13 @@ async def async_setup_entry(hass, config_entry, async_add_devices):
                     device.name,
                     entity_description.key,
                 )
+
+    estia_devices: list[ToshibaEstiaDevice] = await device_manager.get_estia_devices()
+    for estia_device in estia_devices:
+        new_entities.extend(
+            ToshibaEstiaSwitchEntity(estia_device, description)
+            for description in ESTIA_SWITCHES
+        )
 
     if new_entities:
         _LOGGER.info("Adding %d switch entities", len(new_entities))
@@ -234,3 +290,34 @@ class ToshibaAcSwitchEntity(ToshibaAcStateEntity, SwitchEntity):
     async def async_turn_on(self, **kwargs: Any):
         """Turn the switch on."""
         await self.entity_description.async_turn_on(self._device)
+
+
+class ToshibaEstiaSwitchEntity(ToshibaEstiaStateEntity, SwitchEntity):
+    """Switches one function of an Estia heat pump on or off."""
+
+    entity_description: ToshibaEstiaSwitchDescription
+
+    def __init__(
+        self, device: ToshibaEstiaDevice, description: ToshibaEstiaSwitchDescription
+    ):
+        """Initialize the switch."""
+        super().__init__(device)
+        self.entity_description = description
+        self._attr_unique_id = f"{device.ac_unique_id}_{description.key}"
+
+    @property
+    def is_on(self) -> bool:
+        """Return True if the function is on."""
+        return self._device.function_is_on(self.entity_description.flag)
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Switch the function on."""
+        await self._async_command(
+            self._device.set_function(self.entity_description.flag, True)
+        )
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Switch the function off."""
+        await self._async_command(
+            self._device.set_function(self.entity_description.flag, False)
+        )

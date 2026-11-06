@@ -6,19 +6,19 @@ no entity here.
 from __future__ import annotations
 
 import logging
-
-from .toshiba_ac.device.estia import ToshibaEstiaDevice
-from .toshiba_ac.device.properties import EstiaCompressorStatus
+from typing import Any
 
 from homeassistant.components.water_heater import (
     WaterHeaterEntity,
     WaterHeaterEntityFeature,
 )
 from homeassistant.components.water_heater.const import STATE_ELECTRIC, STATE_HEAT_PUMP
-from homeassistant.const import STATE_OFF, UnitOfTemperature
+from homeassistant.const import ATTR_TEMPERATURE, STATE_OFF, UnitOfTemperature
 
 from .const import DOMAIN
 from .entity import ToshibaEstiaStateEntity
+from .toshiba_ac.device.estia import ToshibaEstiaDevice
+from .toshiba_ac.device.properties import EstiaCompressorStatus
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -38,13 +38,15 @@ async def async_setup_entry(hass, config_entry, async_add_devices):
 class ToshibaEstiaDomesticHotWater(ToshibaEstiaStateEntity, WaterHeaterEntity):
     """The hot water tank of a Toshiba Estia heat pump.
 
-    Read-only: Toshiba's protocol for writing to an Estia unit has not been
-    reverse engineered, so no feature flag is advertised and the entity exposes
-    no setters. Use the Toshiba app or the wall controller to change anything.
+    Sets the tank target and switches hot water on or off. The operation shows
+    what is heating the tank right now and cannot be selected; the electric
+    DHW boost is a switch entity of its own.
     """
 
     _attr_translation_key = "dhw"
-    _attr_supported_features = WaterHeaterEntityFeature(0)
+    _attr_supported_features = (
+        WaterHeaterEntityFeature.TARGET_TEMPERATURE | WaterHeaterEntityFeature.ON_OFF
+    )
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_operation_list = [STATE_OFF, STATE_HEAT_PUMP, STATE_ELECTRIC]
 
@@ -61,6 +63,9 @@ class ToshibaEstiaDomesticHotWater(ToshibaEstiaStateEntity, WaterHeaterEntity):
         so reporting it takes precedence: that is the expensive case a user
         wants to see.
         """
+        if not self._device.dhw_is_enabled:
+            return STATE_OFF
+
         if self._device.electric_coil_dhw_is_active:
             return STATE_ELECTRIC
 
@@ -83,11 +88,35 @@ class ToshibaEstiaDomesticHotWater(ToshibaEstiaStateEntity, WaterHeaterEntity):
         return self._device.dhw_target_temperature
 
     @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return whether hot water is switched on.
+
+        The state shows what heats the tank, which is "off" for an idle tank
+        too, so the on/off switch needs an attribute of its own.
+        """
+        return {"enabled": self._device.dhw_is_enabled}
+
+    @property
     def min_temp(self) -> float:
         """Return the minimum temperature."""
-        return 20
+        return self._device.dhw_min_temperature
 
     @property
     def max_temp(self) -> float:
         """Return the maximum temperature."""
-        return 60
+        return self._device.dhw_max_temperature
+
+    async def async_set_temperature(self, **kwargs: Any) -> None:
+        """Set the tank target."""
+        if (temperature := kwargs.get(ATTR_TEMPERATURE)) is None:
+            return
+
+        await self._async_command(self._device.set_dhw_target_temperature(temperature))
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Switch hot water on."""
+        await self._async_command(self._device.set_dhw_on(True))
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Switch hot water off."""
+        await self._async_command(self._device.set_dhw_on(False))

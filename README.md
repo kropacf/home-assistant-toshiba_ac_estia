@@ -13,14 +13,21 @@ Toshiba AC integration into home-assistant.io
 >
 > This repository ([kropacf/home-assistant-toshiba_ac_estia](https://github.com/kropacf/home-assistant-toshiba_ac_estia)) is a fork of [vmvelev/home-assistant-toshiba_ac](https://github.com/vmvelev/home-assistant-toshiba_ac) that adds support for **Toshiba Estia** air-to-water heat pumps. AC units and Estia units on the same Toshiba account share one cloud connection; the Toshiba cloud allows only one client per account, so this integration replaces a separate Estia integration rather than running next to it.
 >
-> Estia entities (read-only):
+> Estia entities:
 >
 > | Platform | Entities |
 > |----------|----------|
-> | `climate` | Zone 1 |
-> | `water_heater` | Hot water |
+> | `climate` | Zone 1, Zone 2 (only on units with a second zone) - water target temperature, heat/off |
+> | `water_heater` | Hot water - target temperature, on/off |
+> | `switch` | Heating curve (auto), Night setback, Hot water boost (electric heater), Frost protection, Anti-bacterial (legionella) |
 > | `sensor` | Compressor status, hot water target, energy consumption, water flow rate, outdoor temperature, water heat exchanger inlet/outlet, water heater outlet, floor heating inlet |
 > | `binary_sensor` | Water pump, heat electric heater, DHW electric heater |
+>
+> Control notes:
+> - The heat pump has **one heating on/off for both zones**: switching Zone 1 or Zone 2 off switches both off.
+> - The heating curve switch also applies to both zones. Switching it off re-sends the Zone 1 target, as the Toshiba app does.
+> - Hot water boost runs the electric immersion heater.
+> - Sensors and binary sensors stay read-only. Commands go through the Toshiba cloud the way the Toshiba app sends them; the unit confirms each one within about a second.
 >
 > The protocol library is **vendored** in `custom_components/toshiba_ac_community/toshiba_ac/` (`toshiba-ac-community` 0.7.2 plus Estia support, Apache-2.0, see the `LICENSE.txt` there) instead of being installed from PyPI.
 >

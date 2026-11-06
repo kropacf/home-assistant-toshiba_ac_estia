@@ -43,6 +43,9 @@
     "climate": {
       "zone_1": {
         "name": "Zone 1"
+      },
+      "zone_2": {
+        "name": "Zone 2"
       }
     },
     "select": {
@@ -105,11 +108,26 @@
       "air_purifier": {
         "name": "Air purifier"
       },
+      "anti_bacterial": {
+        "name": "Anti-bacterial (legionella)"
+      },
+      "dhw_boost": {
+        "name": "Hot water boost (electric heater)"
+      },
       "eco_mode": {
         "name": "ECO mode"
       },
+      "frost_protection": {
+        "name": "Frost protection"
+      },
+      "heating_curve": {
+        "name": "Heating curve (auto)"
+      },
       "high_power_mode": {
         "name": "High Power Mode"
+      },
+      "night_setback": {
+        "name": "Night setback"
       },
       "wireless_led": {
         "name": "Wireless LED"

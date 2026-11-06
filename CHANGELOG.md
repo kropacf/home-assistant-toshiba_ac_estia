@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2026.10.0.2] - 2026-11-06
+
+Fork release ([kropacf/home-assistant-toshiba_ac_estia](https://github.com/kropacf/home-assistant-toshiba_ac_estia)).
+
+### Added - Toshiba Estia control
+
+Estia heat pumps can now be controlled, using the command protocol of the Toshiba app (`CMD_HDU_TO_ESTIA` through the cloud's `IoTHub/SendCommand` endpoint):
+
+- **Zone 1** climate: water target temperature and heat/off. The unit has one heating switch for both zones, so turning zone 1 off turns zone 2 off too.
+- **Zone 2** climate, new, created only when the unit reports a second zone: its own water target; on/off is shared with zone 1.
+- **Hot water** water heater: target temperature and on/off (`enabled` attribute shows the switch, the state still shows what heats the tank).
+- Switches: **Heating curve (auto)** for both zones, **Night setback**, **Hot water boost (electric heater)**, **Frost protection** and **Anti-bacterial (legionella)**. The unit keeps these in one register that every command rewrites, so each toggle re-sends the current state of the others; if the unit ever reports a bit whose meaning is unknown, the switches refuse to send rather than guess.
+- Setpoint ranges come from the device record (DHW 40-75 °C, zones 20-65 °C on the reference unit), falling back to those values when the record lacks them.
+
+Everything else stays read-only.
+
+### Fixed - Estia status decoding
+
+- Zone 1 now shows **off** when heating is switched off (status byte 5); it used to follow only the operation mode.
+- Hot water switched off (status byte 1 `08`) is no longer read as on.
+- Status byte 11 is the zone 1 auto flag, not an outdoor temperature (the outdoor sensor was always the TO water sensor). Bytes 12-18 are decoded as the zone 2 block, byte 19 as the function flags.
+- The compressor counts as heating when it runs for either zone.
+
 ## [2026.10.0.1] - 2026-11-06
 
 Fork release ([kropacf/home-assistant-toshiba_ac_estia](https://github.com/kropacf/home-assistant-toshiba_ac_estia)) based on 2026.10.0.

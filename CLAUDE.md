@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Home Assistant custom component integration for Toshiba AC units and Toshiba Estia air-to-water heat pumps (Estia is read-only). Connects to Toshiba's cloud service via the vendored `toshiba_ac` library to control air conditioning units and retrieve status.
+Home Assistant custom component integration for Toshiba AC units and Toshiba Estia air-to-water heat pumps. Connects to Toshiba's cloud service via the vendored `toshiba_ac` library to control air conditioning units and retrieve status.
 
 This repo is a fork of `vmvelev/home-assistant-toshiba_ac` that adds Estia support. It keeps the `toshiba_ac_community` domain so it can replace the original in place.
 
@@ -35,6 +35,7 @@ Local tests (run from the repo root with the dev venv):
 ```bash
 .venv/bin/python -m pytest tests/toshiba_ac   # vendored library, incl. Estia
 .venv/bin/python tests/test_config_flow.py    # integration tests run as scripts
+.venv/bin/python tests/test_estia_control.py  # (every tests/test_*.py likewise)
 ```
 
 GitHub Actions validation:
@@ -45,7 +46,7 @@ GitHub Actions validation:
 ## Dependencies
 
 ### Vendored Library
-The `toshiba_ac` library is **vendored** in `custom_components/toshiba_ac_community/toshiba_ac/`: `toshiba-ac-community` 0.8.0 (`github.com/vmvelev/Toshiba-AC-control`, forked from `github.com/KaSroka/Toshiba-AC-control`, Apache-2.0) plus Estia support (`device/estia.py`, `device/estia_fcu_state.py`):
+The `toshiba_ac` library is **vendored** in `custom_components/toshiba_ac_community/toshiba_ac/`: `toshiba-ac-community` 0.8.0 (`github.com/vmvelev/Toshiba-AC-control`, forked from `github.com/KaSroka/Toshiba-AC-control`, Apache-2.0) plus Estia support (`device/estia.py`, `device/estia_fcu_state.py`, `device/estia_command.py`):
 - Handles authentication with Toshiba cloud HTTP API
 - Manages Azure AMQP connection for real-time device state updates
 - Provides `ToshibaAcDeviceManager`, `ToshibaAcDevice` and `ToshibaEstiaDevice` classes
@@ -107,6 +108,14 @@ All imports follow the [official HA documentation](https://developers.home-assis
 **Diagnostics (`diagnostics.py`)**
 - Provides diagnostic data for troubleshooting via HA's diagnostics feature
 - Redacts sensitive data (username, password, tokens, device IDs)
+
+**Estia control**
+- Commands: `ToshibaEstiaCommand` (14-byte `CMD_HDU_TO_ESTIA` payload, `ff` = unchanged) sent by `ToshibaAcHttpApi.send_command` as a REST `POST /api/IoTHub/SendCommand`, the way the Toshiba app does (AC commands go over AMQP instead). `sourceId` is the manager's registered device id.
+- Command byte 10 is a function register the unit rewrites as a whole: always build it with `ToshibaEstiaFcuState.function_register()` (status byte 19 plus the auto flag from byte 11). It raises on unknown bits; never send or drop bits whose meaning is unknown.
+- The command layout is not the status layout (zone 1 target: command byte 5, status byte 7). The protocol notes live outside this repo in `estia-re/FINDINGS.md`; do not implement anything marked unknown there.
+- Heating on/off is one switch for both zones; the heating curve (auto) is one switch for both zones too.
+- Status byte 20 feeds the "water pump" binary sensor but is probably an operating-state field; do not build on it.
+- Estia entities send through `ToshibaEstiaEntity._async_command`, which turns refusals and cloud errors into `HomeAssistantError`. Entities never write state after a command; the unit's acknowledgement arrives as a normal state push. The one exception is in the device: after a function-register command it merges the expected status bytes 11, 18 and 19 right away, so a second quick toggle is not built from the old register.
 
 **State Flow**
 1. `ToshibaAcDevice` receives state update via AMQP

@@ -14,14 +14,15 @@
 
 import datetime
 import asyncio
+import itertools
 import logging
 import random
 import secrets
 import typing as t
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import aiohttp
-from ..device.properties import EstiaWaterTemperatures, ToshibaAcDeviceEnergyConsumption
+from ..device.properties import EstiaSetpointLimits, EstiaWaterTemperatures, ToshibaAcDeviceEnergyConsumption
 from ..utils import RetryJitterMode, retry_on_exception
 
 logger = logging.getLogger(__name__)
@@ -55,12 +56,51 @@ class ToshibaEstiaAdditionalInfo:
     fcu: t.Optional[str]
     serial_number: t.Optional[str]
     temperatures: EstiaWaterTemperatures
+    limits: EstiaSetpointLimits = field(default_factory=EstiaSetpointLimits)
 
 
 @dataclass
 class ToshibaDeviceConnectionState:
     device_id: str
     online: bool
+
+
+def _find_field(res: t.Any, key: str, depth: int = 2) -> t.Any:
+    """Look a field up at the top level of a response, then in its nested objects.
+
+    The Estia setpoint limits are known by name only, not by where in the device
+    record Toshiba puts them, so they are searched for a couple of levels deep.
+    """
+    if not isinstance(res, dict):
+        return None
+
+    if key in res:
+        return res[key]
+
+    if depth <= 0:
+        return None
+
+    for value in res.values():
+        found = _find_field(value, key, depth - 1)
+        if found is not None:
+            return found
+
+    return None
+
+
+def _parse_estia_limit(res: t.Any, key: str) -> t.Optional[float]:
+    """Read a setpoint limit, encoded like every Estia setpoint: T * 2 + 32."""
+    value = _find_field(res, key)
+
+    try:
+        raw = value if isinstance(value, int) and not isinstance(value, bool) else int(value, 16)
+    except (TypeError, ValueError):
+        return None
+
+    if not 0 <= raw < 0xFF:
+        return None
+
+    return (raw - 32) / 2
 
 
 def _parse_hex_field(res: t.Any, key: str) -> t.Optional[int]:
@@ -95,6 +135,7 @@ class ToshibaAcHttpApi:
     ESTIA_MAPPING_PATH = "/api/Estia/GetConsumerEstiaMapping"
     ESTIA_STATE_PATH = "/api/Estia/GetCurrentEstiaStateByUniqueDeviceId"
     ALL_DEVICE_STATE_PATH = "/api/AC/GetAllDeviceState"
+    SEND_COMMAND_PATH = "/api/IoTHub/SendCommand"
 
     def __init__(
         self,
@@ -120,6 +161,9 @@ class ToshibaAcHttpApi:
         self._auth_generation = 0
         self._request_pacing_lock = asyncio.Lock()
         self._next_request_not_before = 0.0
+        # The app numbers its commands with an 8-digit counter. Start at a random
+        # point so that a restart does not reuse message ids of the last session.
+        self._message_counter = itertools.count(random.randrange(10_000_000))
 
     async def _pace_requests(self) -> None:
         async with self._request_pacing_lock:
@@ -429,7 +473,64 @@ class ToshibaAcHttpApi:
             room_water=_parse_hex_field(res, "RoomWater_temp"),
         )
 
-        return ToshibaEstiaAdditionalInfo(cdu=cdu, fcu=fcu, serial_number=serial_number, temperatures=temperatures)
+        limits = EstiaSetpointLimits(
+            dhw_min=_parse_estia_limit(res, "DHW_min"),
+            dhw_max=_parse_estia_limit(res, "DHW_max"),
+            zone1_heat_min=_parse_estia_limit(res, "Zone1_wt_heat_min"),
+            zone1_heat_max=_parse_estia_limit(res, "Zone1_wt_heat_max"),
+            zone2_heat_min=_parse_estia_limit(res, "Zone2_wt_heat_min"),
+            zone2_heat_max=_parse_estia_limit(res, "Zone2_wt_heat_max"),
+        )
+
+        return ToshibaEstiaAdditionalInfo(
+            cdu=cdu,
+            fcu=fcu,
+            serial_number=serial_number,
+            temperatures=temperatures,
+            limits=limits,
+        )
+
+    async def send_command(self, source_id: str, target_id: str, cmd: str, data: str) -> None:
+        """Send a command to a device through Toshiba's REST command endpoint.
+
+        This is how the Toshiba mobile app sends commands to an Estia unit; the
+        envelope is the same one AC commands use over AMQP. The unit acknowledges
+        with a status diff carrying the same messageId, which arrives as a normal
+        state push and is merged like any other.
+        """
+        # The app's message ids look like "MB_<first 18 chars of sourceId>-<8 digits>"
+        message_id = f"MB_{source_id[:18]}-{next(self._message_counter) % 100_000_000:08d}"
+        # The app sends the UTC time of day with seven fractional digits
+        time_stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%H:%M:%S.%f") + "0"
+
+        post = {
+            "timeStamp": time_stamp,
+            "messageId": message_id,
+            "sourceId": source_id,
+            "targetId": [target_id],
+            "cmd": cmd,
+            "payload": {"data": data},
+        }
+
+        logger.debug(f"Sending {cmd} {data} to {target_id} as {message_id}")
+
+        # Skip the outer rate-limit retry, whose backoff runs to minutes: a
+        # setpoint arriving that late is worse than a visible failure. Transient
+        # errors still get the short retry; every command is idempotent.
+        res = await ToshibaAcHttpApi.request_api.__wrapped__(self, self.SEND_COMMAND_PATH, post=post)  # type: ignore[attr-defined]
+
+        if not isinstance(res, dict):
+            raise ToshibaAcHttpApiError(f"Malformed response to {cmd}: {res!r}")
+
+        failed = res.get("FailedTargetIds") or []
+        unauthorized = res.get("UnauthorizedTargetIds") or []
+        status = res.get("Status")
+
+        if unauthorized:
+            raise ToshibaAcHttpApiError(f"{cmd} rejected, not authorized for {unauthorized}")
+
+        if failed or not isinstance(status, str) or status.lower() != "success":
+            raise ToshibaAcHttpApiError(f"{cmd} failed (status {status!r}, failed targets {failed})")
 
     async def get_device_connection_state(self, device_ids: t.List[str]) -> t.Dict[str, ToshibaDeviceConnectionState]:
         """Return whether each device is currently connected to the Toshiba cloud.

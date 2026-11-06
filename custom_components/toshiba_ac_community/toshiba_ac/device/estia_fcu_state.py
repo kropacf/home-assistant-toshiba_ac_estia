@@ -18,7 +18,12 @@ import logging
 import struct
 import typing as t
 
-from ..device.properties import EstiaCompressorStatus, EstiaWaterMode, EstiaWaterTemperatures
+from ..device.properties import (
+    EstiaCompressorStatus,
+    EstiaFunctionFlag,
+    EstiaWaterMode,
+    EstiaWaterTemperatures,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,11 +42,19 @@ class ToshibaEstiaFcuState:
 
     NONE_VAL = 0xFF
 
+    # Function flags status byte 19 is known to carry (command byte 10 without AUTO)
+    STATUS_FUNCTION_FLAGS = int(
+        EstiaFunctionFlag.FROST_PROTECTION
+        | EstiaFunctionFlag.NIGHT_SETBACK
+        | EstiaFunctionFlag.DHW_BOOST
+        | EstiaFunctionFlag.ANTI_BACTERIAL
+    )
+
     DECODED_BYTES = 26
     DECODING_STRUCT = struct.Struct(f"{DECODED_BYTES}B")
 
     class Temperature:
-        """Setpoints and the outdoor reading carried in the status string."""
+        """Setpoints carried in the status string and in commands, T * 2 + 32."""
 
         @staticmethod
         def from_raw(raw: int) -> t.Optional[float]:
@@ -49,6 +62,16 @@ class ToshibaEstiaFcuState:
                 return None
 
             return (raw - 32) / 2
+
+        @staticmethod
+        def to_raw(value: float) -> int:
+            raw = int(round(value * 2)) + 32
+
+            # 0xFF would read as "leave unchanged" in a command
+            if not 0 <= raw < ToshibaEstiaFcuState.NONE_VAL:
+                raise ValueError(f"temperature {value} cannot be encoded")
+
+            return raw
 
     class WaterTemperature:
         """Water circuit sensors, which use a different offset than the setpoints."""
@@ -95,12 +118,19 @@ class ToshibaEstiaFcuState:
         self._dhw_target_temperature = self.NONE_VAL
         self._outdoor_unit_dhw = 0
         self._heating_coil_dhw = 0
-        self._heating_is_active = 0
+        self._zone1_on_off = self.NONE_VAL
         self._water_operation_mode = 0
         self._zone1_target_temperature = self.NONE_VAL
         self._outdoor_unit_heat = 0
         self._heating_coil_heat = 0
-        self._outdoor_temperature = self.NONE_VAL
+        self._zone1_auto = self.NONE_VAL
+        self._zone2_on_off = self.NONE_VAL
+        self._zone2_operation_mode = 0
+        self._zone2_target_temperature = self.NONE_VAL
+        self._zone2_outdoor_unit_heat = 0
+        self._zone2_heating_coil_heat = 0
+        self._zone2_auto = self.NONE_VAL
+        self._function_flags = self.NONE_VAL
         self._water_pump_status = 0
         self._water_temperatures = EstiaWaterTemperatures()
 
@@ -111,26 +141,30 @@ class ToshibaEstiaFcuState:
     def decode(self, hex_state: str) -> None:
         data = self.DECODING_STRUCT.unpack(bytes.fromhex(hex_state[: self.DECODED_BYTES * 2]))
         (
-            self._dhw_is_enabled,  # Byte 1 - DHW function enabled
+            self._dhw_is_enabled,  # Byte 1 - DHW flags, 0x0c on / 0x08 off
             self._dhw_target_temperature,  # Byte 2 - DHW target temperature
             self._outdoor_unit_dhw,  # Byte 3 - Outdoor unit active for DHW
             self._heating_coil_dhw,  # Byte 4 - Heater coil active for DHW
-            self._heating_is_active,  # Byte 5 - Water function activated
+            self._zone1_on_off,  # Byte 5 - Zone 1 on/off, 0x03 on / 0x02 off
             self._water_operation_mode,  # Byte 6 - Operation mode - heat/cool/auto
             self._zone1_target_temperature,  # Byte 7 - Zone 1 heating target temperature
-            _,  # Byte 8 - Superseded zone 1 target temperature
-            self._outdoor_unit_heat,  # Byte 9 - Outdoor unit active for heating
-            self._heating_coil_heat,  # Byte 10 - Heating coil active for heating
-            self._outdoor_temperature,  # Byte 11 - Outdoor temperature
-            _,  # Bytes 12-19 - Not understood yet
-            _,
-            _,
-            _,
-            _,
-            _,
-            _,
-            _,
-            self._water_pump_status,  # Byte 20 - Water pump running
+            _,  # Byte 8 - Second zone 1 target temperature, meaning unknown
+            self._outdoor_unit_heat,  # Byte 9 - Outdoor unit active for zone 1
+            self._heating_coil_heat,  # Byte 10 - Heating coil active for zone 1
+            self._zone1_auto,  # Byte 11 - Zone 1 auto (heating curve) flag
+            self._zone2_on_off,  # Byte 12 - Zone 2 on/off, same values as byte 5
+            self._zone2_operation_mode,  # Byte 13 - Zone 2 operation mode
+            self._zone2_target_temperature,  # Byte 14 - Zone 2 heating target temperature
+            _,  # Byte 15 - Second zone 2 target temperature, meaning unknown
+            self._zone2_outdoor_unit_heat,  # Byte 16 - Outdoor unit active for zone 2
+            self._zone2_heating_coil_heat,  # Byte 17 - Heating coil active for zone 2
+            self._zone2_auto,  # Byte 18 - Zone 2 auto (heating curve) flag
+            self._function_flags,  # Byte 19 - Function flags, command byte 10 without AUTO
+            # Byte 20 - Named "water pump running" by the original decoder, but it
+            # was seen going 06 -> 04 when heating was switched off and 04 while
+            # heating stayed on, so it is more likely an operating-state field.
+            # Kept as is until there is evidence of what it really means.
+            self._water_pump_status,
             room_water,  # Bytes 21-26 - Water circuit sensors, same order and
             twi,  # encoding as the fields of the AMQP heartbeat
             two,
@@ -190,7 +224,8 @@ class ToshibaEstiaFcuState:
 
     @property
     def dhw_is_enabled(self) -> bool:
-        return bool(self._dhw_is_enabled) and self._dhw_is_enabled != self.NONE_VAL
+        # 0x0c on, 0x08 off: bit 0x04 is the enable bit
+        return self._dhw_is_enabled != self.NONE_VAL and bool(self._dhw_is_enabled & 0x04)
 
     @property
     def dhw_target_temperature(self) -> t.Optional[float]:
@@ -201,23 +236,99 @@ class ToshibaEstiaFcuState:
         return ToshibaEstiaFcuState.Temperature.from_raw(self._zone1_target_temperature)
 
     @property
-    def outdoor_temperature(self) -> t.Optional[float]:
-        return ToshibaEstiaFcuState.Temperature.from_raw(self._outdoor_temperature)
+    def zone2_target_temperature(self) -> t.Optional[float]:
+        return ToshibaEstiaFcuState.Temperature.from_raw(self._zone2_target_temperature)
 
     @property
     def zone1_mode(self) -> EstiaWaterMode:
         return ToshibaEstiaFcuState.WaterMode.from_raw(self._water_operation_mode)
 
     @property
+    def zone2_mode(self) -> EstiaWaterMode:
+        return ToshibaEstiaFcuState.WaterMode.from_raw(self._zone2_operation_mode)
+
+    @property
+    def zone1_is_on(self) -> bool:
+        return self._is_on(self._zone1_on_off)
+
+    @property
+    def zone2_is_on(self) -> bool:
+        return self._is_on(self._zone2_on_off)
+
+    @property
     def heating_is_active(self) -> bool:
-        return bool(self._heating_is_active)
+        """Kept for compatibility; the same as zone1_is_on."""
+        return self.zone1_is_on
+
+    @property
+    def has_zone2(self) -> bool:
+        """Return True if the unit reports a second heating zone."""
+        return self._zone2_on_off not in (0x00, self.NONE_VAL)
+
+    @property
+    def zone1_auto(self) -> t.Optional[bool]:
+        """Return the zone 1 auto (heating curve) flag, None if not reported."""
+        return self._flag(self._zone1_auto)
+
+    @property
+    def zone2_auto(self) -> t.Optional[bool]:
+        """Return the zone 2 auto (heating curve) flag, None if not reported."""
+        return self._flag(self._zone2_auto)
+
+    @property
+    def function_flags(self) -> int:
+        """Return status byte 19 as is: 0xFF when the unit has not reported it."""
+        return self._function_flags
+
+    def has_function_flag(self, flag: EstiaFunctionFlag) -> bool:
+        if self._function_flags == self.NONE_VAL:
+            return False
+
+        return bool(self._function_flags & int(flag))
+
+    def function_register(self) -> int:
+        """Rebuild command byte 10 from the current state.
+
+        The unit rewrites the whole register on every command, so the value sent
+        must carry every function exactly as it is now: the function flags from
+        status byte 19 plus the auto flag from status byte 11.
+
+        Raises ValueError rather than guess if the state holds anything that
+        cannot be re-sent faithfully: a flag register or auto flag that was never
+        reported, or bits whose meaning is unknown. Sending unknown bits could
+        switch on something nobody understands, and dropping them would silently
+        switch it off, so neither is done.
+        """
+        flags = self._function_flags
+
+        if flags == self.NONE_VAL:
+            raise ValueError("the function flags have not been reported yet")
+
+        unknown = flags & (0xFF ^ self.STATUS_FUNCTION_FLAGS)
+        if unknown:
+            raise ValueError(f"the function flags hold unknown bits 0x{unknown:02x} (status byte 19 = 0x{flags:02x})")
+
+        auto = self.zone1_auto
+        if auto is None:
+            raise ValueError(f"the auto flag has an unknown value 0x{self._zone1_auto:02x}")
+
+        return flags | (int(EstiaFunctionFlag.AUTO) if auto else 0)
+
+    def _is_on(self, raw: int) -> bool:
+        return raw not in (0x00, self.NONE_VAL) and bool(raw & 0x01)
+
+    def _flag(self, raw: int) -> t.Optional[bool]:
+        if raw in (0x00, 0x01):
+            return bool(raw)
+
+        return None
 
     @property
     def compressor_status(self) -> EstiaCompressorStatus:
         if self._outdoor_unit_dhw:
             return EstiaCompressorStatus.DHW
 
-        if self._outdoor_unit_heat:
+        if self.zone1_outdoor_unit_is_active or self.zone2_outdoor_unit_is_active:
             return EstiaCompressorStatus.HEAT
 
         return EstiaCompressorStatus.OFF
@@ -234,11 +345,26 @@ class ToshibaEstiaFcuState:
     def electric_coil_heat_is_active(self) -> bool:
         return bool(self._heating_coil_heat)
 
+    @property
+    def zone1_outdoor_unit_is_active(self) -> bool:
+        return bool(self._outdoor_unit_heat)
+
+    @property
+    def zone2_outdoor_unit_is_active(self) -> bool:
+        return self._zone2_outdoor_unit_heat not in (0x00, self.NONE_VAL)
+
+    @property
+    def zone2_electric_coil_is_active(self) -> bool:
+        return self._zone2_heating_coil_heat not in (0x00, self.NONE_VAL)
+
     def __str__(self) -> str:
         return (
             f"WaterMode: {self.zone1_mode.name}"
             f", Compressor: {self.compressor_status.name}"
             f", WaterPump: {self.water_pump_is_running}"
             f", ElectricCoil(DHW/Heat): {self.electric_coil_dhw_is_active}/{self.electric_coil_heat_is_active}"
-            f", Target(DHW/Zone1): {self.dhw_target_temperature}/{self.zone1_target_temperature}"
+            f", Target(DHW/Zone1/Zone2): {self.dhw_target_temperature}/{self.zone1_target_temperature}"
+            f"/{self.zone2_target_temperature}"
+            f", On(DHW/Zone1/Zone2): {self.dhw_is_enabled}/{self.zone1_is_on}/{self.zone2_is_on}"
+            f", Auto: {self.zone1_auto}, Functions: 0x{self.function_flags:02x}"
         )

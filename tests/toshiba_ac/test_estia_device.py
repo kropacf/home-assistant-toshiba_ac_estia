@@ -3,9 +3,15 @@
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from custom_components.toshiba_ac_community.toshiba_ac.device.estia import ToshibaEstiaDevice
-from custom_components.toshiba_ac_community.toshiba_ac.device_manager import ToshibaAcDeviceManager
-from custom_components.toshiba_ac_community.toshiba_ac.utils.http_api import ToshibaAcDeviceInfo
+from custom_components.toshiba_ac_community.toshiba_ac.device.estia import (
+    ToshibaEstiaDevice,
+)
+from custom_components.toshiba_ac_community.toshiba_ac.device_manager import (
+    ToshibaAcDeviceManager,
+)
+from custom_components.toshiba_ac_community.toshiba_ac.utils.http_api import (
+    ToshibaAcDeviceInfo,
+)
 
 # Idle unit, heating mode, outdoor 16.5 C - see test_estia_fcu_state for the full decode
 STATE = "0c8800000206484800000002064848000000200062626666515cff000000884848484e52"

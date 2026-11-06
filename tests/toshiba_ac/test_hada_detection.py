@@ -2,10 +2,18 @@ import typing as t
 import unittest
 
 from custom_components.toshiba_ac_community.toshiba_ac.device import ToshibaAcDevice
-from custom_components.toshiba_ac_community.toshiba_ac.device.features import ToshibaAcFeatures
-from custom_components.toshiba_ac_community.toshiba_ac.device.properties import ToshibaAcSwingMode
-from custom_components.toshiba_ac_community.toshiba_ac.utils.amqp_api import ToshibaAcAmqpApi
-from custom_components.toshiba_ac_community.toshiba_ac.utils.http_api import ToshibaAcHttpApi
+from custom_components.toshiba_ac_community.toshiba_ac.device.features import (
+    ToshibaAcFeatures,
+)
+from custom_components.toshiba_ac_community.toshiba_ac.device.properties import (
+    ToshibaAcSwingMode,
+)
+from custom_components.toshiba_ac_community.toshiba_ac.utils.amqp_api import (
+    ToshibaAcAmqpApi,
+)
+from custom_components.toshiba_ac_community.toshiba_ac.utils.http_api import (
+    ToshibaAcHttpApi,
+)
 
 # Real merit feature strings from the field (library PR #1 thread and
 # KaSroka/Toshiba-AC-control#69): the Daiseikai 10 supports H.DA, the Haori

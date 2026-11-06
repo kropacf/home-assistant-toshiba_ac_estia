@@ -7,8 +7,13 @@ over the AMQP heartbeat and the extended info endpoint at the same time.
 
 import unittest
 
-from custom_components.toshiba_ac_community.toshiba_ac.device.estia_fcu_state import ToshibaEstiaFcuState
-from custom_components.toshiba_ac_community.toshiba_ac.device.properties import EstiaCompressorStatus, EstiaWaterMode
+from custom_components.toshiba_ac_community.toshiba_ac.device.estia_fcu_state import (
+    ToshibaEstiaFcuState,
+)
+from custom_components.toshiba_ac_community.toshiba_ac.device.properties import (
+    EstiaCompressorStatus,
+    EstiaWaterMode,
+)
 
 # Idle, heating mode, hot water target 52 C, zone 1 target 20 C, outdoor 16.5 C
 STATE_AT_10_00 = "0c8800000206484800000002064848000000200062626666515cff000000884848484e52"

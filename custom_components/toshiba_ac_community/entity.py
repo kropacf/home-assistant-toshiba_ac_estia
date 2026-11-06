@@ -1,14 +1,19 @@
 """Base classes for Toshiba AC entities."""
 from __future__ import annotations
 
+from collections.abc import Awaitable
 import logging
 
+import aiohttp
+
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import Entity
 
 from .const import DOMAIN
 from .toshiba_ac.device import ToshibaAcDevice
-from .toshiba_ac.device.estia import ToshibaEstiaDevice
+from .toshiba_ac.device.estia import ToshibaEstiaDevice, ToshibaEstiaDeviceError
+from .toshiba_ac.utils.http_api import ToshibaAcHttpApiError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -100,6 +105,25 @@ class ToshibaEstiaEntity(Entity):
             and self._device.http_api.access_token
             and self._device.is_online
         )
+
+    async def _async_command(self, command: Awaitable[None]) -> None:
+        """Send a command, turning a refusal or a cloud error into a UI error.
+
+        The new state is not written here: the unit acknowledges every command
+        with a status update, which reaches the entity through the callback.
+        """
+        try:
+            await command
+        except (
+            ToshibaEstiaDeviceError,
+            ToshibaAcHttpApiError,
+            ValueError,
+            aiohttp.ClientError,
+            TimeoutError,
+        ) as err:
+            raise HomeAssistantError(
+                f"{self._device.name}: command failed: {err}"
+            ) from err
 
 
 class ToshibaEstiaStateEntity(ToshibaEstiaEntity):
