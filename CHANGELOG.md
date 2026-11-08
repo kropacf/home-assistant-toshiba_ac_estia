@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [2026.10.0.4] - 2026-11-08
 
 ### Changed - hot water on/off is the operation mode
 
