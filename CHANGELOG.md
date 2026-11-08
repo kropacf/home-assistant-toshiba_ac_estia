@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed - hot water on/off is the operation mode
+
+The **Hot water** water heater now offers operation modes **Heat pump** and **Off**, so the thermostat card can switch it like the zones' heat/off. The state follows the on/off switch; it no longer shows what heats the tank (use the compressor status sensor and the DHW electric heater binary sensor for that), and the `enabled` attribute is gone.
+
 ## [2026.10.0.3] - 2026-11-06
 
 ### Added - applied water temperature per zone

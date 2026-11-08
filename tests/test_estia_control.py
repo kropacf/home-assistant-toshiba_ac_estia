@@ -33,6 +33,7 @@ from custom_components.toshiba_ac_community.water_heater import (
 )
 from homeassistant.components.climate.const import ClimateEntityFeature, HVACMode
 from homeassistant.components.water_heater import WaterHeaterEntityFeature
+from homeassistant.components.water_heater.const import STATE_HEAT_PUMP
 from homeassistant.const import ATTR_TEMPERATURE, STATE_OFF
 from homeassistant.exceptions import HomeAssistantError
 
@@ -137,22 +138,27 @@ async def _hot_water_control():
 
     assert dhw.supported_features & WaterHeaterEntityFeature.TARGET_TEMPERATURE
     assert dhw.supported_features & WaterHeaterEntityFeature.ON_OFF
-    assert dhw.extra_state_attributes == {"enabled": True}
+    assert dhw.supported_features & WaterHeaterEntityFeature.OPERATION_MODE
+    assert dhw.operation_list == [STATE_HEAT_PUMP, STATE_OFF]
+    assert dhw.current_operation == STATE_HEAT_PUMP
     assert (dhw.min_temp, dhw.max_temp) == (40.0, 75.0)
 
     await dhw.async_set_temperature(**{ATTR_TEMPERATURE: 46})
     await dhw.async_turn_off()
     await dhw.async_turn_on()
+    await dhw.async_set_operation_mode(STATE_OFF)
+    await dhw.async_set_operation_mode(STATE_HEAT_PUMP)
 
     assert _sent(device) == [
         "ff7cffffffffffffffffffffffff",
+        "08ffffffffffffffffffffffffff",
+        "0cffffffffffffffffffffffffff",
         "08ffffffffffffffffffffffffff",
         "0cffffffffffffffffffffffffff",
     ]
 
     await device.handle_cmd_hdu_from_estia({"data": "08" + "ff" * 35})
     assert dhw.current_operation == STATE_OFF
-    assert dhw.extra_state_attributes == {"enabled": False}
 
 
 async def _function_switches():

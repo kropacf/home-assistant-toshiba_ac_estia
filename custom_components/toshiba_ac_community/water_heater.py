@@ -12,13 +12,12 @@ from homeassistant.components.water_heater import (
     WaterHeaterEntity,
     WaterHeaterEntityFeature,
 )
-from homeassistant.components.water_heater.const import STATE_ELECTRIC, STATE_HEAT_PUMP
+from homeassistant.components.water_heater.const import STATE_HEAT_PUMP
 from homeassistant.const import ATTR_TEMPERATURE, STATE_OFF, UnitOfTemperature
 
 from .const import DOMAIN
 from .entity import ToshibaEstiaStateEntity
 from .toshiba_ac.device.estia import ToshibaEstiaDevice
-from .toshiba_ac.device.properties import EstiaCompressorStatus
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -38,17 +37,21 @@ async def async_setup_entry(hass, config_entry, async_add_devices):
 class ToshibaEstiaDomesticHotWater(ToshibaEstiaStateEntity, WaterHeaterEntity):
     """The hot water tank of a Toshiba Estia heat pump.
 
-    Sets the tank target and switches hot water on or off. The operation shows
-    what is heating the tank right now and cannot be selected; the electric
-    DHW boost is a switch entity of its own.
+    Sets the tank target and switches hot water on or off. The operation is
+    that switch (heat pump or off), so the thermostat card can offer it like
+    the zones' heat/off; what heats the tank right now is left to the
+    compressor status sensor and the DHW electric heater binary sensor. The
+    electric DHW boost is a switch entity of its own.
     """
 
     _attr_translation_key = "dhw"
     _attr_supported_features = (
-        WaterHeaterEntityFeature.TARGET_TEMPERATURE | WaterHeaterEntityFeature.ON_OFF
+        WaterHeaterEntityFeature.TARGET_TEMPERATURE
+        | WaterHeaterEntityFeature.OPERATION_MODE
+        | WaterHeaterEntityFeature.ON_OFF
     )
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
-    _attr_operation_list = [STATE_OFF, STATE_HEAT_PUMP, STATE_ELECTRIC]
+    _attr_operation_list = [STATE_HEAT_PUMP, STATE_OFF]
 
     def __init__(self, toshiba_device: ToshibaEstiaDevice):
         """Initialize the water heater entity."""
@@ -57,22 +60,8 @@ class ToshibaEstiaDomesticHotWater(ToshibaEstiaStateEntity, WaterHeaterEntity):
 
     @property
     def current_operation(self) -> str:
-        """Return what is currently heating the tank.
-
-        The immersion heater only ever runs as a supplement to the compressor,
-        so reporting it takes precedence: that is the expensive case a user
-        wants to see.
-        """
-        if not self._device.dhw_is_enabled:
-            return STATE_OFF
-
-        if self._device.electric_coil_dhw_is_active:
-            return STATE_ELECTRIC
-
-        if self._device.compressor_status == EstiaCompressorStatus.DHW:
-            return STATE_HEAT_PUMP
-
-        return STATE_OFF
+        """Return whether hot water is switched on."""
+        return STATE_HEAT_PUMP if self._device.dhw_is_enabled else STATE_OFF
 
     @property
     def current_temperature(self) -> float | None:
@@ -86,15 +75,6 @@ class ToshibaEstiaDomesticHotWater(ToshibaEstiaStateEntity, WaterHeaterEntity):
     def target_temperature(self) -> float | None:
         """Return the temperature the tank is set to reach."""
         return self._device.dhw_target_temperature
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return whether hot water is switched on.
-
-        The state shows what heats the tank, which is "off" for an idle tank
-        too, so the on/off switch needs an attribute of its own.
-        """
-        return {"enabled": self._device.dhw_is_enabled}
 
     @property
     def min_temp(self) -> float:
@@ -112,6 +92,12 @@ class ToshibaEstiaDomesticHotWater(ToshibaEstiaStateEntity, WaterHeaterEntity):
             return
 
         await self._async_command(self._device.set_dhw_target_temperature(temperature))
+
+    async def async_set_operation_mode(self, operation_mode: str) -> None:
+        """Switch hot water on (heat pump) or off."""
+        await self._async_command(
+            self._device.set_dhw_on(operation_mode != STATE_OFF)
+        )
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Switch hot water on."""
